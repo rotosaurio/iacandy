@@ -1,0 +1,536 @@
+// ============================================
+// Firebird AI Assistant - Cliente JavaScript Ultra-Optimizado
+// ============================================
+
+// Variables globales
+let socket = null;
+let sessionId = null;
+let systemInitialized = false;
+let currentTables = [];
+let initTriggered = false;
+let filteredTables = [];
+let searchDebounceTimer = null;
+
+// Configuración de virtualización
+const ITEMS_PER_PAGE = 50;
+let currentPage = 1;
+let totalPages = 1;
+
+// ============================================
+// Inicialización
+// ============================================
+
+document.addEventListener('DOMContentLoaded', function() {
+    sessionId = generateUUID();
+    loadTheme();
+    connectWebSocket();
+    
+    setTimeout(() => {
+        checkSystemStatus();
+    }, 500);
+    
+    setupEventListeners();
+});
+
+function generateUUID() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+}
+
+// ============================================
+// WebSocket
+// ============================================
+
+function connectWebSocket() {
+    socket = io();
+    
+    socket.on('connect', function() {
+        console.log('WebSocket conectado');
+        updateStatus('Conectado', 'success');
+    });
+    
+    socket.on('disconnect', function() {
+        console.log('WebSocket desconectado');
+        updateStatus('Desconectado', 'danger');
+    });
+    
+    socket.on('status_update', function(data) {
+        console.log('Estado actualizado:', data);
+        showNotification(data.message, 'info');
+    });
+}
+
+// ============================================
+// Event Listeners
+// ============================================
+
+function setupEventListeners() {
+    const messageInput = document.getElementById('messageInput');
+    
+    if (messageInput) {
+        messageInput.addEventListener('input', function() {
+            updateCharCount();
+            autoResize(this);
+        });
+        
+        messageInput.addEventListener('keydown', function(e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+    }
+    
+    // Búsqueda de tablas con debounce
+    const tableSearch = document.getElementById('tableSearch');
+    if (tableSearch) {
+        tableSearch.addEventListener('input', function() {
+            clearTimeout(searchDebounceTimer);
+            searchDebounceTimer = setTimeout(() => {
+                filterTables();
+            }, 300); // Debounce de 300ms
+        });
+        
+        tableSearch.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                this.value = '';
+                filterTables();
+            }
+        });
+    }
+}
+
+function autoResize(textarea) {
+    textarea.style.height = 'auto';
+    textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px';
+}
+
+function updateCharCount() {
+    const messageInput = document.getElementById('messageInput');
+    const charCount = document.getElementById('charCount');
+    
+    if (messageInput && charCount) {
+        const count = messageInput.value.length;
+        charCount.textContent = `${count} caracteres`;
+        
+        if (count > 500) {
+            charCount.classList.add('text-warning');
+        } else {
+            charCount.classList.remove('text-warning');
+        }
+    }
+}
+
+// ============================================
+// Tema (Dark Mode)
+// ============================================
+
+function toggleTheme() {
+    const currentTheme = document.documentElement.getAttribute('data-theme');
+    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    
+    document.documentElement.setAttribute('data-theme', newTheme);
+    localStorage.setItem('theme', newTheme);
+    
+    const icon = document.querySelector('#toggleTheme i');
+    if (icon) {
+        icon.className = newTheme === 'dark' ? 'bi bi-sun-fill' : 'bi bi-moon-stars-fill';
+    }
+    
+    showNotification(`Tema ${newTheme === 'dark' ? 'oscuro' : 'claro'} activado`, 'success');
+}
+
+function loadTheme() {
+    const savedTheme = localStorage.setItem('theme') || 'light';
+    document.documentElement.setAttribute('data-theme', savedTheme);
+    
+    const icon = document.querySelector('#toggleTheme i');
+    if (icon) {
+        icon.className = savedTheme === 'dark' ? 'bi bi-sun-fill' : 'bi bi-moon-stars-fill';
+    }
+}
+
+// ============================================
+// Sidebar Toggle
+// ============================================
+
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidePanel');
+    if (sidebar) {
+        sidebar.classList.toggle('show');
+    }
+}
+
+// Cerrar sidebar al hacer click fuera (mobile)
+document.addEventListener('click', function(e) {
+    const sidebar = document.getElementById('sidePanel');
+    const toggleBtn = document.getElementById('toggleSidebar');
+    
+    if (sidebar && sidebar.classList.contains('show')) {
+        if (!sidebar.contains(e.target) && !toggleBtn.contains(e.target)) {
+            sidebar.classList.remove('show');
+        }
+    }
+});
+
+// ============================================
+// Limpiar Chat
+// ============================================
+
+function clearChat() {
+    const messagesDiv = document.getElementById('messages');
+    const welcomeMessage = document.getElementById('welcomeMessage');
+    
+    if (confirm('¿Estás seguro de que quieres limpiar el historial de chat?')) {
+        if (messagesDiv) {
+            messagesDiv.innerHTML = '';
+            messagesDiv.style.display = 'none';
+        }
+        
+        if (welcomeMessage) {
+            welcomeMessage.style.display = 'block';
+        }
+        
+        showNotification('Chat limpiado', 'success');
+    }
+}
+
+// ============================================
+// Sistema de Estado
+// ============================================
+
+async function checkSystemStatus() {
+    try {
+        const response = await axios.get('/api/status');
+        const data = response.data;
+        
+        console.log('Estado del sistema:', data);
+        
+        if (data.initialized) {
+            systemInitialized = true;
+            onSystemInitialized(data);
+        } else {
+            console.log('Sistema no inicializado, intentando inicializar...');
+            updateStatus('Conectando...', 'warning');
+            
+            const initBtn = document.getElementById('initButton');
+            if (initBtn) initBtn.style.display = 'inline-block';
+            
+            if (!initTriggered) {
+                initTriggered = true;
+                initializeSystem();
+            } else {
+                setTimeout(() => {
+                    checkSystemStatus();
+                }, 2000);
+            }
+        }
+    } catch (error) {
+        console.error('Error verificando estado:', error);
+        updateStatus('Error', 'danger');
+        
+        setTimeout(() => {
+            checkSystemStatus();
+        }, 3000);
+    }
+}
+
+async function initializeSystem() {
+    try {
+        const response = await axios.post('/api/initialize');
+        const data = response.data;
+        
+        if (data.status === 'initialized' || data.status === 'already_initialized') {
+            systemInitialized = true;
+            onSystemInitialized(data);
+            showNotification('✅ Sistema inicializado correctamente', 'success');
+        }
+    } catch (error) {
+        console.error('Error inicializando sistema:', error);
+        showNotification('❌ Error al inicializar el sistema', 'danger');
+    }
+}
+
+function onSystemInitialized(data) {
+    console.log('Sistema inicializado:', data);
+    
+    const messageInput = document.getElementById('messageInput');
+    const sendButton = document.getElementById('sendButton');
+    const clearChatBtn = document.getElementById('clearChat');
+    
+    if (messageInput) {
+        messageInput.disabled = false;
+        messageInput.focus();
+    }
+    if (sendButton) sendButton.disabled = false;
+    if (clearChatBtn) clearChatBtn.disabled = false;
+    
+    const initBtn = document.getElementById('initButton');
+    if (initBtn) initBtn.style.display = 'none';
+    
+    updateStatus('Sistema Listo', 'success');
+    
+    loadTables();
+    
+    if (data.schema && data.schema.stats) {
+        updateSchemaStats(data.schema.stats);
+    }
+    
+    showNotification('✅ Sistema listo para recibir consultas', 'success');
+}
+
+// ============================================
+// Tablas - CON VIRTUALIZACIÓN OPTIMIZADA
+// ============================================
+
+async function loadTables() {
+    try {
+        showTableLoadingState();
+        
+        const response = await axios.get('/api/schema/tables');
+        const data = response.data;
+        
+        currentTables = data.tables;
+        filteredTables = [...currentTables];
+        currentPage = 1;
+        totalPages = Math.ceil(filteredTables.length / ITEMS_PER_PAGE);
+        
+        renderTableList();
+        
+        document.getElementById('schemaInfo').innerHTML = `
+            <div class="schema-stats">
+                <div class="schema-stat text-center">
+                    <div class="schema-stat-value">${data.total}</div>
+                    <div class="schema-stat-label">Tablas Totales</div>
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        console.error('Error cargando tablas:', error);
+        document.getElementById('tableList').innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-exclamation-triangle"></i>
+                Error cargando tablas
+            </div>
+        `;
+    }
+}
+
+function showTableLoadingState() {
+    document.getElementById('tableList').innerHTML = `
+        <div class="text-center p-3">
+            <div class="spinner-border spinner-border-sm" role="status">
+                <span class="visually-hidden">Cargando...</span>
+            </div>
+            <div class="mt-2 text-muted small">Cargando tablas...</div>
+        </div>
+    `;
+}
+
+function renderTableList() {
+    const tableList = document.getElementById('tableList');
+    
+    if (!filteredTables || filteredTables.length === 0) {
+        tableList.innerHTML = `
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle"></i>
+                No se encontraron tablas
+            </div>
+        `;
+        return;
+    }
+    
+    // Calcular rango de items a mostrar
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, filteredTables.length);
+    const pageTables = filteredTables.slice(startIndex, endIndex);
+    
+    // Usar documentFragment para mejor performance
+    const fragment = document.createDocumentFragment();
+    
+    pageTables.forEach(table => {
+        const div = document.createElement('div');
+        div.className = 'table-item';
+        div.onclick = () => showTableDetails(table.name);
+        
+        div.innerHTML = `
+            <span>
+                <i class="bi bi-table"></i>
+                <span class="table-name">${table.name}</span>
+            </span>
+            <span class="badge">${formatNumber(table.row_count)}</span>
+        `;
+        
+        fragment.appendChild(div);
+    });
+    
+    tableList.innerHTML = '';
+    tableList.appendChild(fragment);
+    
+    // Agregar paginación si hay más de una página
+    if (totalPages > 1) {
+        const paginationDiv = document.createElement('div');
+        paginationDiv.className = 'table-pagination';
+        paginationDiv.innerHTML = `
+            <button class="btn btn-sm btn-outline-primary" 
+                    onclick="changePage(-1)" 
+                    ${currentPage === 1 ? 'disabled' : ''}>
+                <i class="bi bi-chevron-left"></i>
+            </button>
+            <span class="pagination-info">
+                ${startIndex + 1}-${endIndex} de ${filteredTables.length}
+            </span>
+            <button class="btn btn-sm btn-outline-primary" 
+                    onclick="changePage(1)" 
+                    ${currentPage === totalPages ? 'disabled' : ''}>
+                <i class="bi bi-chevron-right"></i>
+            </button>
+        `;
+        
+        tableList.appendChild(paginationDiv);
+    }
+}
+
+function changePage(direction) {
+    currentPage += direction;
+    currentPage = Math.max(1, Math.min(currentPage, totalPages));
+    renderTableList();
+    
+    // Scroll al principio de la lista
+    const tableList = document.getElementById('tableList');
+    if (tableList) {
+        tableList.scrollTop = 0;
+    }
+}
+
+function filterTables() {
+    const searchTerm = document.getElementById('tableSearch').value.toLowerCase().trim();
+    
+    if (!searchTerm) {
+        filteredTables = [...currentTables];
+    } else {
+        filteredTables = currentTables.filter(table =>
+            table.name.toLowerCase().includes(searchTerm)
+        );
+    }
+    
+    currentPage = 1;
+    totalPages = Math.ceil(filteredTables.length / ITEMS_PER_PAGE);
+    renderTableList();
+    
+    // Mostrar mensaje si no hay resultados
+    if (filteredTables.length === 0 && searchTerm) {
+        document.getElementById('tableList').innerHTML = `
+            <div class="alert alert-warning">
+                <i class="bi bi-search"></i>
+                No se encontraron tablas que coincidan con "${searchTerm}"
+            </div>
+        `;
+    }
+}
+
+async function showTableDetails(tableName) {
+    try {
+        const modal = new bootstrap.Modal(document.getElementById('tableModal'));
+        document.getElementById('tableModalTitle').innerHTML = `
+            <i class="bi bi-table"></i> ${tableName}
+            <div class="spinner-border spinner-border-sm ms-2" role="status"></div>
+        `;
+        document.getElementById('tableModalBody').innerHTML = `
+            <div class="text-center p-4">
+                <div class="spinner-border" role="status"></div>
+                <div class="mt-2">Cargando detalles...</div>
+            </div>
+        `;
+        modal.show();
+        
+        const response = await axios.get(`/api/schema/table/${tableName}`);
+        const table = response.data;
+        
+        document.getElementById('tableModalTitle').innerHTML = `
+            <i class="bi bi-table"></i> ${table.name}
+        `;
+        
+        let columnsHtml = '';
+        table.columns.forEach(col => {
+            columnsHtml += `
+                <tr>
+                    <td><strong>${col.name}</strong></td>
+                    <td><span class="badge bg-secondary">${col.type}</span></td>
+                    <td>${col.nullable ? '<span class="badge bg-warning">Null</span>' : '<span class="badge bg-success">Not Null</span>'}</td>
+                    <td><code>${col.default_value || '-'}</code></td>
+                </tr>
+            `;
+        });
+        
+        document.getElementById('tableModalBody').innerHTML = `
+            <div class="mb-4">
+                <div class="row">
+                    <div class="col-md-4">
+                        <strong>Tipo:</strong> <span class="badge bg-primary">${table.type}</span>
+                    </div>
+                    <div class="col-md-4">
+                        <strong>Registros:</strong> <span class="badge bg-info">${formatNumber(table.row_count)}</span>
+                    </div>
+                    <div class="col-md-4">
+                        <strong>Columnas:</strong> <span class="badge bg-secondary">${table.columns.length}</span>
+                    </div>
+                </div>
+            </div>
+            
+            <h6 class="mb-3"><i class="bi bi-list-columns"></i> Columnas</h6>
+            <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                <table class="table table-sm table-hover">
+                    <thead class="table-dark sticky-top">
+                        <tr>
+                            <th>Nombre</th>
+                            <th>Tipo</th>
+                            <th>Nullable</th>
+                            <th>Default</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${columnsHtml}
+                    </tbody>
+                </table>
+            </div>
+            
+            ${table.primary_keys && table.primary_keys.length > 0 ? `
+                <div class="mt-3">
+                    <h6><i class="bi bi-key-fill"></i> Clave Primaria</h6>
+                    <div>${table.primary_keys.map(pk => `<span class="badge bg-warning me-1">${pk}</span>`).join('')}</div>
+                </div>
+            ` : ''}
+            
+            ${table.relationships && (table.relationships.references.length > 0 || table.relationships.referenced_by.length > 0) ? `
+                <div class="mt-3">
+                    <h6><i class="bi bi-diagram-3-fill"></i> Relaciones</h6>
+                    ${table.relationships.references.length > 0 ? `
+                        <div class="mb-2">
+                            <strong>Referencia a:</strong>
+                            ${table.relationships.references.map(ref => `<span class="badge bg-success me-1">${ref}</span>`).join('')}
+                        </div>
+                    ` : ''}
+                    ${table.relationships.referenced_by.length > 0 ? `
+                        <div>
+                            <strong>Referenciada por:</strong>
+                            ${table.relationships.referenced_by.map(ref => `<span class="badge bg-info me-1">${ref}</span>`).join('')}
+                        </div>
+                    ` : ''}
+                </div>
+            ` : ''}
+        `;
+    } catch (error) {
+        console.error('Error cargando detalles de tabla:', error);
+        document.getElementById('tableModalBody').innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-exclamation-triangle"></i>
+                Error cargando detalles de la tabla
+            </div>
+        `;
+    }
+}
+
+// Continúa en el siguiente bloque...

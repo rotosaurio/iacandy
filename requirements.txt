@@ -1,0 +1,36 @@
+# Core dependencies
+flask==2.3.3
+flask-cors==4.0.0
+flask-socketio==5.5.1
+eventlet==0.33.3
+
+# Database
+firebird-driver==2.0.2
+
+# AI and ML
+openai==2.3.0
+chromadb==0.4.22
+sentence-transformers==5.1.1
+
+# Data processing
+pandas==2.0.3
+numpy==1.24.3
+openpyxl==3.1.2
+xlsxwriter==3.1.9
+
+# GUI (optional, for desktop version)
+PySide6==6.5.3
+
+# Utilities
+python-dotenv==1.0.0
+PyYAML==6.0.1
+click==8.1.7
+colorama==0.4.6
+
+# Additional dependencies (auto-resolved)
+dnspython>=2.4.2
+python-engineio>=4.8.0
+python-socketio>=5.12.0
+bidict>=0.22.1
+simple-websocket>=1.0.0
+wsproto>=1.2.0

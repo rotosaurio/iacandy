@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🍬 Cadnymart Data Assistant - Chihuahua</title>
+    
+    <!-- Google Fonts - Optimizado -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'candy-pink': '#FF69B4',
+                        'candy-purple': '#9370DB',
+                        'candy-orange': '#FFA500',
+                        'candy-blue': '#87CEEB',
+                        'candy-green': '#98FB98',
+                        'candy-red': '#FF6347',
+                        'candy-yellow': '#FFD700',
+                        'bg-main': '#FFF8FB',
+                        'bg-sidebar': '#FEF7FF',
+                        'text-purple': '#2D1B69',
+                        'text-blue': '#7B68EE',
+                        'text-plum': '#DDA0DD'
+                    },
+                    borderRadius: {
+                        'candy': '16px',
+                        'candy-sm': '12px'
+                    },
+                    boxShadow: {
+                        'candy': '0 8px 16px -2px rgba(255, 105, 180, 0.15)',
+                        'candy-lg': '0 16px 32px -4px rgba(255, 105, 180, 0.2)'
+                    },
+                    animation: {
+                        'candy-bounce': 'candyBounce 3s ease-in-out infinite',
+                        'fade-in-up': 'fadeInUp 0.6s ease-out forwards',
+                        'candy-pulse': 'candyPulse 2s ease-in-out infinite',
+                        'float': 'float 3s ease-in-out infinite',
+                        'glow': 'glow 2s ease-in-out infinite alternate',
+                        'slide-in-right': 'slideInRight 0.5s ease-out forwards',
+                        'wiggle': 'wiggle 1s ease-in-out infinite'
+                    },
+                    keyframes: {
+                        float: {
+                            '0%, 100%': { transform: 'translateY(0px)' },
+                            '50%': { transform: 'translateY(-10px)' }
+                        },
+                        glow: {
+                            '0%': { boxShadow: '0 0 5px rgba(255, 105, 180, 0.5)' },
+                            '100%': { boxShadow: '0 0 20px rgba(255, 105, 180, 0.8)' }
+                        },
+                        slideInRight: {
+                            '0%': { transform: 'translateX(100%)', opacity: '0' },
+                            '100%': { transform: 'translateX(0)', opacity: '1' }
+                        },
+                        wiggle: {
+                            '0%, 100%': { transform: 'rotate(-3deg)' },
+                            '50%': { transform: 'rotate(3deg)' }
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Bootstrap CSS (mantener para componentes específicos) -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    
+    <!-- Code Highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <!-- Navbar moderno con Tailwind -->
+    <nav class="bg-gradient-to-r from-candy-pink via-candy-purple to-candy-orange shadow-candy-lg sticky top-0 z-50 backdrop-blur-sm" role="banner">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <!-- Logo y marca -->
+                <div class="flex items-center">
+                    <button class="lg:hidden mr-3 p-2 text-white hover:bg-white/20 rounded-candy transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-white/50" id="toggleSidebar" onclick="toggleSidebar()" aria-label="Abrir menú lateral">
+                        <i class="bi bi-list text-xl"></i>
+                </button>
+
+                    <div class="flex items-center space-x-3">
+                        <!-- Decoraciones candy animadas -->
+                        <span class="text-2xl animate-candy-bounce" aria-hidden="true">🍭</span>
+                        <i class="bi bi-shop text-2xl text-white" aria-hidden="true"></i>
+                        <div class="text-white">
+                            <h1 class="text-lg font-bold hidden sm:block">Cadnymart Data Assistant</h1>
+                            <p class="text-xs opacity-80 hidden md:block">Chihuahua - Sistema Inteligente</p>
+                        </div>
+                        <span class="text-2xl animate-candy-bounce" aria-hidden="true">🍬</span>
+                    </div>
+                </div>
+
+                <!-- Controles del navbar -->
+                <div class="flex items-center space-x-2">
+                    <!-- Estado del sistema -->
+                    <div class="hidden sm:flex items-center bg-white/20 backdrop-blur-sm rounded-full px-3 py-1">
+                        <div class="w-2 h-2 bg-green-400 rounded-full mr-2 animate-pulse"></div>
+                        <span class="text-white text-sm font-medium" id="statusBadge">Sistema Listo</span>
+                    </div>
+                    
+                    <!-- Badge de auto-actualización -->
+                    <div class="hidden md:flex items-center bg-candy-blue/30 backdrop-blur-sm rounded-full px-3 py-1" title="Actualización automática de estadísticas">
+                        <i class="bi bi-arrow-repeat text-white text-sm mr-1"></i>
+                        <span class="text-white text-xs font-medium">Auto: 12h</span>
+            </div>
+
+                    <!-- Botones de control -->
+                    <div class="flex items-center space-x-1" role="toolbar" aria-label="Controles del sistema">
+                        <!-- Botón de tema -->
+                        <button class="p-2 text-white hover:bg-white/20 rounded-candy transition-all duration-200 hover:scale-110 focus:outline-none focus:ring-2 focus:ring-white/50" id="toggleTheme" onclick="toggleTheme()" title="Cambiar tema" aria-label="Cambiar tema">
+                            <i class="bi bi-moon-stars-fill text-lg"></i>
+                        </button>
+
+                        <!-- Botón limpiar chat -->
+                        <button class="p-2 text-white hover:bg-white/20 rounded-candy transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-white/50" id="clearChat" onclick="clearChat()" title="Limpiar chat" disabled aria-label="Limpiar conversación">
+                            <i class="bi bi-trash text-lg"></i>
+                </button>
+
+                        <!-- Botón inicializar (oculto por defecto) -->
+                        <button class="p-2 text-white hover:bg-white/20 rounded-candy transition-all duration-200 hidden focus:outline-none focus:ring-2 focus:ring-white/50" id="initButton" onclick="initializeSystem()" title="Inicializar sistema" aria-label="Inicializar sistema">
+                            <i class="bi bi-plug text-lg"></i>
+                </button>
+
+                        <!-- Botón de ayuda -->
+                        <button class="p-2 text-white hover:bg-white/20 rounded-candy transition-all duration-200 hover:scale-110 focus:outline-none focus:ring-2 focus:ring-white/50" onclick="showHelp()" title="Centro de ayuda" aria-label="Abrir centro de ayuda">
+                            <i class="bi bi-question-circle text-lg"></i>
+                </button>
+
+                        <!-- Botón de información -->
+                        <button class="p-2 text-white hover:bg-white/20 rounded-candy transition-all duration-200 hover:scale-110 focus:outline-none focus:ring-2 focus:ring-white/50" onclick="showInfo()" title="Información del sistema" aria-label="Ver información del sistema">
+                            <i class="bi bi-info-circle text-lg"></i>
+                </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid h-100">
+        <div class="row h-100">
+            <!-- Panel principal - Chat Rediseñado con Tailwind (ancho completo) -->
+            <div class="col-12 flex flex-col bg-gradient-to-br from-white via-candy-pink/5 to-candy-purple/10">
+                <!-- Área de mensajes con Tailwind -->
+                <div class="flex-1 overflow-hidden p-4 md:p-6" id="chatContainer">
+                    <div class="welcome-message text-center max-w-4xl mx-auto" id="welcomeMessage">
+                        <!-- Icono principal animado -->
+                        <div class="mb-8 relative">
+                            <div class="relative inline-block">
+                                <i class="bi bi-robot text-8xl bg-gradient-to-r from-candy-pink via-candy-purple to-candy-orange bg-clip-text text-transparent animate-candy-pulse"></i>
+                                <div class="absolute -top-2 -right-2">
+                                    <span class="text-2xl animate-candy-bounce">🍭</span>
+                                </div>
+                            </div>
+                </div>
+                
+                        <!-- Títulos con gradientes -->
+                        <h1 class="text-4xl sm:text-5xl md:text-6xl font-bold mb-4 bg-gradient-to-r from-candy-pink via-candy-purple to-candy-orange bg-clip-text text-transparent">
+                            🍬 Cadnymart AI
+                        </h1>
+                        <p class="text-lg sm:text-xl text-gray-600 mb-8 max-w-2xl mx-auto leading-relaxed px-4">
+                            Tu asistente inteligente para datos de dulces en Chihuahua
+                        </p>
+
+                        <!-- Grid de consultas de ejemplo con Tailwind -->
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                            <div class="example-query-card bg-white/80 backdrop-blur-sm border-2 border-candy-purple/20 rounded-candy p-4 hover:border-candy-pink hover:bg-candy-pink/10 transition-all duration-300 cursor-pointer group animate-fade-in-up hover:animate-wiggle"
+                                 onclick="useExample(this)" data-query="Muéstrame todas las tablas disponibles">
+                                <i class="bi bi-table text-3xl text-candy-purple mb-2 group-hover:text-candy-pink transition-colors animate-float"></i>
+                                <span class="font-semibold text-gray-700 group-hover:text-candy-purple transition-colors">Ver tablas</span>
+                            </div>
+                            <div class="example-query-card bg-white/80 backdrop-blur-sm border-2 border-candy-green/20 rounded-candy p-4 hover:border-candy-green hover:bg-candy-green/10 transition-all duration-300 cursor-pointer group animate-fade-in-up"
+                                 onclick="useExample(this)" data-query="¿Qué productos de dulces tenemos en inventario?">
+                                <i class="bi bi-candy text-3xl text-candy-green mb-2 group-hover:text-candy-green transition-colors"></i>
+                                <span class="font-semibold text-gray-700 group-hover:text-candy-green transition-colors">Inventario</span>
+                            </div>
+                            <div class="example-query-card bg-white/80 backdrop-blur-sm border-2 border-candy-yellow/20 rounded-candy p-4 hover:border-candy-yellow hover:bg-candy-yellow/10 transition-all duration-300 cursor-pointer group animate-fade-in-up"
+                                 onclick="useExample(this)" data-query="Muestra las ventas del último mes">
+                                <i class="bi bi-graph-up text-3xl text-candy-yellow mb-2 group-hover:text-candy-yellow transition-colors"></i>
+                                <span class="font-semibold text-gray-700 group-hover:text-candy-yellow transition-colors">Ventas</span>
+                            </div>
+                            <div class="example-query-card bg-white/80 backdrop-blur-sm border-2 border-candy-orange/20 rounded-candy p-4 hover:border-candy-orange hover:bg-candy-orange/10 transition-all duration-300 cursor-pointer group animate-fade-in-up"
+                                 onclick="useExample(this)" data-query="¿Cuáles son nuestros productos más vendidos?">
+                                <i class="bi bi-star-fill text-3xl text-candy-orange mb-2 group-hover:text-candy-orange transition-colors"></i>
+                                <span class="font-semibold text-gray-700 group-hover:text-candy-orange transition-colors">Top productos</span>
+                            </div>
+                </div>
+
+                        <!-- Fila adicional de consultas -->
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                            <div class="example-query-card bg-white/80 backdrop-blur-sm border-2 border-candy-blue/20 rounded-candy p-4 hover:border-candy-blue hover:bg-candy-blue/10 transition-all duration-300 cursor-pointer group animate-fade-in-up"
+                                 onclick="useExample(this)" data-query="Lista nuestros clientes más frecuentes">
+                                <i class="bi bi-people-fill text-3xl text-candy-blue mb-2 group-hover:text-candy-blue transition-colors"></i>
+                                <span class="font-semibold text-gray-700 group-hover:text-candy-blue transition-colors">Clientes</span>
+                                </div>
+                            <div class="example-query-card bg-white/80 backdrop-blur-sm border-2 border-candy-red/20 rounded-candy p-4 hover:border-candy-red hover:bg-candy-red/10 transition-all duration-300 cursor-pointer group animate-fade-in-up"
+                                 onclick="useExample(this)" data-query="¿Cuánto hemos vendido hoy?">
+                                <i class="bi bi-cash-coin text-3xl text-candy-red mb-2 group-hover:text-candy-red transition-colors"></i>
+                                <span class="font-semibold text-gray-700 group-hover:text-candy-red transition-colors">Ventas del día</span>
+                                </div>
+                            <div class="example-query-card bg-white/80 backdrop-blur-sm border-2 border-candy-yellow/20 rounded-candy p-4 hover:border-candy-yellow hover:bg-candy-yellow/10 transition-all duration-300 cursor-pointer group animate-fade-in-up"
+                                 onclick="useExample(this)" data-query="Muestra productos con stock bajo">
+                                <i class="bi bi-exclamation-triangle text-3xl text-candy-yellow mb-2 group-hover:text-candy-yellow transition-colors"></i>
+                                <span class="font-semibold text-gray-700 group-hover:text-candy-yellow transition-colors">Stock bajo</span>
+                                </div>
+                            <div class="example-query-card bg-white/80 backdrop-blur-sm border-2 border-candy-purple/20 rounded-candy p-4 hover:border-candy-purple hover:bg-candy-purple/10 transition-all duration-300 cursor-pointer group animate-fade-in-up"
+                                 onclick="useExample(this)" data-query="Análisis de ventas por categoría de dulces">
+                                <i class="bi bi-pie-chart text-3xl text-candy-purple mb-2 group-hover:text-candy-purple transition-colors"></i>
+                                <span class="font-semibold text-gray-700 group-hover:text-candy-purple transition-colors">Análisis</span>
+                    </div>
+                </div>
+
+                        <!-- Área para sugerencias personalizadas -->
+                        <div id="suggestionsContainer" class="mt-8"></div>
+                    </div>
+
+                    <div class="messages max-w-4xl mx-auto" id="messages" style="display: none;">
+                        <!-- Los mensajes del chat se agregarán aquí -->
+                </div>
+            </div>
+
+                <!-- Área de entrada rediseñada con Tailwind -->
+                <div class="border-t border-candy-purple/20 bg-white/80 backdrop-blur-sm p-4 md:p-6">
+                    <div class="max-w-4xl mx-auto">
+                        <div class="relative">
+                            <textarea class="w-full p-4 pr-16 bg-white/90 backdrop-blur-sm border-2 border-candy-purple/30 rounded-candy focus:border-candy-pink focus:ring-2 focus:ring-candy-pink/20 transition-all duration-200 resize-none placeholder-candy-purple/60"
+                                     id="messageInput" rows="1" placeholder="Pregúntame sobre inventario, ventas, productos... (Ctrl+Enter para enviar)"
+                                     disabled aria-label="Campo de entrada de consulta" aria-describedby="inputHelp"></textarea>
+
+                            <!-- Botón flotante de enviar -->
+                            <button class="absolute right-2 bottom-2 bg-gradient-to-r from-candy-pink to-candy-orange text-white p-3 rounded-candy hover:from-candy-pink/80 hover:to-candy-orange/80 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed animate-candy-pulse focus:outline-none focus:ring-2 focus:ring-white/50"
+                                    id="sendButton" onclick="sendMessage()" disabled aria-label="Enviar consulta">
+                                <i class="bi bi-send-fill text-lg"></i>
+                            </button>
+                        </div>
+
+                        <!-- Información adicional -->
+                        <div class="flex justify-between items-center mt-3 text-sm text-candy-purple/70">
+                            <div class="flex items-center gap-4">
+                                <span class="flex items-center gap-1">
+                                    <i class="bi bi-lightbulb"></i>
+                                    Usa consultas en lenguaje natural
+                                </span>
+                                <span class="hidden sm:flex items-center gap-1">
+                                    <kbd class="px-2 py-1 bg-candy-purple/20 rounded text-xs">Ctrl</kbd> +
+                                    <kbd class="px-2 py-1 bg-candy-purple/20 rounded text-xs">Enter</kbd>
+                                    para enviar
+                                </span>
+                            </div>
+                            <div id="charCount" class="text-candy-purple/60">
+                                0 caracteres
+                                </div>
+                                </div>
+                                </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+    <!-- Modal de ayuda -->
+    <div class="modal fade" id="helpModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="bi bi-question-circle"></i> Centro de Ayuda - Cadnymart
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="help-content">
+                        <div class="help-section">
+                            <h6><i class="bi bi-chat-dots"></i> Cómo hacer consultas</h6>
+                            <p>Escribe tus preguntas en lenguaje natural. El sistema entiende consultas sobre:</p>
+                            <ul>
+                                <li><strong>Inventario:</strong> "¿Qué productos tenemos?" "¿Cuánto stock queda?"</li>
+                                <li><strong>Ventas:</strong> "¿Cuánto vendimos hoy?" "Ventas del mes"</li>
+                                <li><strong>Clientes:</strong> "Clientes más frecuentes" "Información de cliente X"</li>
+                                <li><strong>Análisis:</strong> "Productos más vendidos" "Tendencias de ventas"</li>
+                            </ul>
+                        </div>
+
+                        <div class="help-section">
+                            <h6><i class="bi bi-tags"></i> Categorías de datos</h6>
+                            <p>Usa las pestañas de categorías para filtrar tablas por tipo:</p>
+                            <div class="category-help">
+                                <span class="badge bg-primary"><i class="bi bi-candy"></i> Productos</span>
+                                <span class="badge bg-success"><i class="bi bi-boxes"></i> Inventario</span>
+                                <span class="badge bg-warning"><i class="bi bi-graph-up"></i> Ventas</span>
+                                <span class="badge bg-info"><i class="bi bi-people"></i> Clientes</span>
+                    </div>
+                </div>
+
+                        <div class="help-section">
+                            <h6><i class="bi bi-keyboard"></i> Atajos de teclado</h6>
+                            <ul>
+                                <li><kbd>Ctrl+Enter</kbd> - Enviar mensaje</li>
+                                <li><kbd>↑</kbd> / <kbd>↓</kbd> - Navegar historial (próximamente)</li>
+                            </ul>
+                        </div>
+
+                        <div class="help-section">
+                            <h6><i class="bi bi-lightbulb"></i> Consejos útiles</h6>
+                            <div class="tips">
+                                <div class="tip">
+                                    <i class="bi bi-check-circle text-success"></i>
+                                    <span>Sé específico en tus preguntas para obtener mejores resultados</span>
+                                </div>
+                                <div class="tip">
+                                    <i class="bi bi-check-circle text-success"></i>
+                                    <span>Usa las consultas de ejemplo como punto de partida</span>
+                                </div>
+                                <div class="tip">
+                                    <i class="bi bi-check-circle text-success"></i>
+                                    <span>El sistema aprende de tus consultas para sugerirte contenido relevante</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de información -->
+    <div class="modal fade" id="infoModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="bi bi-info-circle"></i> Información del Sistema
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="infoModalBody">
+                    <!-- La información se cargará aquí -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de detalles de tabla -->
+    <div class="modal fade" id="tableModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="tableModalTitle">
+                        <i class="bi bi-table"></i> Detalles de Datos Cadnymart
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="tableModalBody">
+                    <!-- Los detalles se cargarán aquí -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts - Optimizados -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js" defer></script>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js" defer></script>
+    <!-- Prism se carga de forma diferida -->
+    <script>
+        // Lazy load Prism para resaltado de código
+        let prismLoaded = false;
+        function loadPrism() {
+            if (prismLoaded) return;
+            prismLoaded = true;
+            const script1 = document.createElement('script');
+            script1.src = 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js';
+            script1.defer = true;
+            document.head.appendChild(script1);
+
+            const script2 = document.createElement('script');
+            script2.src = 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js';
+            script2.defer = true;
+            document.head.appendChild(script2);
+        }
+        // Cargar Prism cuando sea necesario
+        document.addEventListener('DOMContentLoaded', function() {
+            // Lazy load después de 2 segundos o cuando se muestre código
+            setTimeout(loadPrism, 2000);
+        });
+    </script>
+    <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
+</body>
+</html>

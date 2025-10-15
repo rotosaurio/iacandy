@@ -1,0 +1,39 @@
+================================================================================
+REPORTE DE ENRIQUECIMIENTO DE METADATOS MICROSIP
+================================================================================
+
+📊 ESTADÍSTICAS GENERALES
+--------------------------------------------------------------------------------
+Total de tablas: 549
+Total de categorías: 13
+Tablas con keywords: 549
+Tablas con relaciones: 450
+
+📁 DISTRIBUCIÓN POR CATEGORÍAS
+--------------------------------------------------------------------------------
+  OTROS: 283 tablas
+  VENTAS: 77 tablas
+  CATALOGOS: 62 tablas
+  TRANSACCIONES: 32 tablas
+  INVENTARIO: 23 tablas
+  FINANZAS: 20 tablas
+  RECURSOS_HUMANOS: 15 tablas
+  CLIENTES: 14 tablas
+  COMPRAS: 8 tablas
+  AUDITORIA: 6 tablas
+  PROVEEDORES: 6 tablas
+  OPERACIONES: 2 tablas
+  PRODUCCION: 1 tablas
+
+🔗 TOP 10 TABLAS MÁS CONECTADAS
+--------------------------------------------------------------------------------
+  ARTICULOS: 59 conexiones
+  ARTICULOS_CLIENTES: 59 conexiones
+  ARTICULOS_DISCRETOS: 58 conexiones
+  ARTICULOS_TIENDA_LINEA: 58 conexiones
+  ARTICULOS_WEB: 58 conexiones
+  DOCTOS_CONSOLIDADOS: 58 conexiones
+  DOCTOS_PROC_CANCEL: 58 conexiones
+  ARTICULOS_VARIANTES: 57 conexiones
+  EXP_REQUERIMIENTOS: 55 conexiones
+  EXP_PUNTOS: 55 conexiones

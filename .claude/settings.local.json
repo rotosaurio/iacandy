@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./venv/Scripts/python.exe -m py_compile:*)",
+      "Bash(test:*)",
+      "Bash(./venv/Scripts/python.exe -c \"from config import config; print(''✓ Config cargada correctamente''); print(f''✓ Base de datos: {config.database.database_path}''); print(f''✓ Usuario: {config.database.username}''); print(f''✓ Modelo IA: {config.ai.model}''); api_key_preview = config.ai.api_key[:15] + ''...'' if len(config.ai.api_key) > 15 else ''NO CONFIGURADA''; print(f''✓ API Key: {api_key_preview}'')\")",
+      "Bash(./venv/Scripts/python.exe -c \"from config import config; print(''Config cargada correctamente''); print(f''Base de datos: {config.database.database_path}''); print(f''Usuario: {config.database.username}''); print(f''Modelo IA: {config.ai.model}''); api_key_preview = config.ai.api_key[:15] + ''...'' if len(config.ai.api_key) > 15 else ''NO CONFIGURADA''; print(f''API Key: {api_key_preview}'')\")",
+      "Bash(./venv/Scripts/python.exe:*)",
+      "Bash(.\\venv\\Scripts\\python.exe:*)",
+      "Bash(timeout:*)",
+      "Bash(taskkill:*)",
+      "Bash(python:*)",
+      "Bash(dir:*)",
+      "Bash(findstr:*)",
+      "Bash(Get-Content logsfirebird_ai_assistant.log -Tail 100)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
