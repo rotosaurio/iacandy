@@ -7,13 +7,12 @@ para una consulta específica.
 """
 
 import json
+import os
 import time
 import threading
 from typing import Dict, List, Tuple, Optional, Any
 from datetime import datetime, timedelta
 
-import chromadb
-from chromadb.config import Settings
 import numpy as np
 import pandas as pd
 from openai import OpenAI
@@ -761,57 +760,53 @@ class TableDescriptor:
 
 
 class VectorStore:
-    """Almacén vectorial usando ChromaDB."""
-    
+    """Almacén vectorial simple usando JSON + numpy (sin ChromaDB)."""
+
     def __init__(self):
-        self.client = None
-        self.collection = None
+        self.embeddings_data = {}  # {table_name: {'embedding': [...], 'metadata': {...}}}
+        self.storage_path = os.path.join(config.rag.vector_db_path, "embeddings.json")
         self._initialized = False
-    
+
     def initialize(self):
-        """Inicializar ChromaDB."""
+        """Inicializar almacén vectorial desde archivo JSON."""
         if self._initialized:
             return
-        
+
         try:
-            logger.info("Inicializando almacén vectorial ChromaDB...")
-            
-            # Configurar ChromaDB con nueva API (sin configuración deprecated)
-            self.client = chromadb.PersistentClient(
-                path=config.rag.vector_db_path
-            )
-            
-            # Obtener o crear colección con función de distancia COSINE
-            try:
-                self.collection = self.client.get_collection(name="schema_embeddings")
-                logger.info("Colección existente encontrada")
-            except:
-                # IMPORTANTE: Usar 'cosine' distance para embeddings normalizados
-                self.collection = self.client.create_collection(
-                    name="schema_embeddings",
-                    metadata={"hnsw:space": "cosine"}  # Usar distancia coseno
-                )
-                logger.info("Nueva colección creada con distancia coseno")
-            
+            logger.info("🔧 Inicializando almacén vectorial simple (JSON + numpy)...")
+
+            # Crear directorio si no existe
+            os.makedirs(config.rag.vector_db_path, exist_ok=True)
+
+            # Cargar embeddings existentes si hay
+            if os.path.exists(self.storage_path):
+                with open(self.storage_path, 'r', encoding='utf-8') as f:
+                    self.embeddings_data = json.load(f)
+                logger.info(f"✓ Cargados {len(self.embeddings_data)} embeddings desde archivo")
+            else:
+                logger.info("✓ Inicializando almacén vectorial vacío")
+
             self._initialized = True
-            logger.info("Almacén vectorial inicializado")
-            
+            logger.info("✅ Almacén vectorial inicializado correctamente")
+
         except Exception as e:
-            logger.error("Error inicializando ChromaDB", e)
-            raise
-    
+            logger.error(f"❌ Error inicializando almacén vectorial: {e}")
+            # No fallar - continuar con diccionario vacío
+            self.embeddings_data = {}
+            self._initialized = True
+
     def add_table_embeddings(self, table_embeddings: Dict[str, Dict[str, Any]]):
         """Agregar embeddings de tablas al almacén."""
         if not self._initialized:
             self.initialize()
-        
+
         try:
-            # Preparar datos para ChromaDB
-            ids = list(table_embeddings.keys())
-            embeddings = [data['embedding'] for data in table_embeddings.values()]
-            metadatas = [
-                {
-                    'table_name': table_name,
+            logger.info(f"💾 Guardando {len(table_embeddings)} embeddings...")
+
+            # Agregar/actualizar embeddings
+            for table_name, data in table_embeddings.items():
+                self.embeddings_data[table_name] = {
+                    'embedding': data['embedding'],
                     'description': data['description'],
                     'row_count': data.get('row_count', 0),
                     'is_active': data.get('is_active', True),
@@ -819,113 +814,96 @@ class VectorStore:
                     'has_foreign_keys': data.get('has_foreign_keys', False),
                     'created_at': datetime.now().isoformat()
                 }
-                for table_name, data in table_embeddings.items()
-            ]
-            documents = [data['description'] for data in table_embeddings.values()]
-            
-            # Limpiar IDs existentes para evitar duplicados
-            try:
-                existing_ids = self.collection.get()['ids']
-                if existing_ids:
-                    # Eliminar IDs que vamos a reemplazar
-                    ids_to_delete = [id for id in ids if id in existing_ids]
-                    if ids_to_delete:
-                        self.collection.delete(ids=ids_to_delete)
-            except:
-                pass
-            
-            # Agregar embeddings en lotes usando upsert para evitar duplicados
-            batch_size = 100
-            for i in range(0, len(ids), batch_size):
-                batch_ids = ids[i:i + batch_size]
-                batch_embeddings = embeddings[i:i + batch_size]
-                batch_metadatas = metadatas[i:i + batch_size]
-                batch_documents = documents[i:i + batch_size]
-                
-                self.collection.upsert(
-                    ids=batch_ids,
-                    embeddings=batch_embeddings,
-                    metadatas=batch_metadatas,
-                    documents=batch_documents
-                )
-            
-            logger.info(f"Agregados {len(ids)} embeddings de tablas al almacén vectorial")
-            
+
+            # Guardar a archivo JSON
+            with open(self.storage_path, 'w', encoding='utf-8') as f:
+                json.dump(self.embeddings_data, f, ensure_ascii=False, indent=2)
+
+            logger.info(f"✅ {len(table_embeddings)} embeddings guardados correctamente")
+
         except Exception as e:
-            logger.error("Error agregando embeddings al almacén", e)
-            raise
-    
-    def search_similar_tables(self, query_embedding: List[float], 
-                            top_k: int = None, 
+            logger.error(f"❌ Error guardando embeddings: {e}")
+            # No fallar - continuar en memoria
+
+    def search_similar_tables(self, query_embedding: List[float],
+                            top_k: int = None,
                             filter_active: bool = True) -> List[Dict[str, Any]]:
-        """Buscar tablas similares usando embedding de consulta."""
+        """Buscar tablas similares usando cosine similarity."""
         if not self._initialized:
             self.initialize()
-        
+
         if top_k is None:
             top_k = config.rag.top_k_tables
-        
+
         try:
-            # Preparar filtros
-            where_filter = {}
-            if filter_active:
-                where_filter["is_active"] = True
-            
-            # Buscar vectores similares
-            results = self.collection.query(
-                query_embeddings=[query_embedding],
-                n_results=top_k,
-                where=where_filter if where_filter else None
-            )
-            
-            # Procesar resultados
-            similar_tables = []
-            
-            if results['ids'] and results['ids'][0]:
-                logger.info(f"ChromaDB retornó {len(results['ids'][0])} resultados candidatos")
-                
-                for i in range(len(results['ids'][0])):
-                    table_info = {
-                        'table_name': results['ids'][0][i],
-                        'description': results['documents'][0][i],
-                        'similarity': 1 - results['distances'][0][i],  # ChromaDB usa distancia coseno
-                        'metadata': results['metadatas'][0][i]
+            if not self.embeddings_data:
+                logger.warning("⚠️ No hay embeddings disponibles para búsqueda")
+                return []
+
+            # Convertir query embedding a numpy array
+            query_vec = np.array(query_embedding)
+
+            # Calcular similitud coseno con todas las tablas
+            similarities = []
+
+            for table_name, data in self.embeddings_data.items():
+                # Filtrar por activas si se solicita
+                if filter_active and not data.get('is_active', True):
+                    continue
+
+                # Calcular cosine similarity
+                table_vec = np.array(data['embedding'])
+
+                # Normalizar vectores
+                query_norm = query_vec / (np.linalg.norm(query_vec) + 1e-10)
+                table_norm = table_vec / (np.linalg.norm(table_vec) + 1e-10)
+
+                # Cosine similarity = dot product de vectores normalizados
+                similarity = float(np.dot(query_norm, table_norm))
+
+                similarities.append({
+                    'table_name': table_name,
+                    'description': data['description'],
+                    'similarity': similarity,
+                    'metadata': {
+                        'row_count': data.get('row_count', 0),
+                        'is_active': data.get('is_active', True),
+                        'column_count': data.get('column_count', 0),
+                        'has_foreign_keys': data.get('has_foreign_keys', False)
                     }
-                    
-                    # Logging detallado de similaridad
-                    logger.debug(f"Tabla: {table_info['table_name']}, Similaridad: {table_info['similarity']:.3f}, Threshold: {config.rag.similarity_threshold}")
-                    
-                    # Solo incluir si supera threshold
-                    if table_info['similarity'] >= config.rag.similarity_threshold:
-                        similar_tables.append(table_info)
-                        logger.debug(f"✓ Tabla {table_info['table_name']} incluida (similaridad: {table_info['similarity']:.3f})")
-                    else:
-                        logger.debug(f"✗ Tabla {table_info['table_name']} excluida (similaridad: {table_info['similarity']:.3f} < {config.rag.similarity_threshold})")
-            else:
-                logger.warning("ChromaDB no retornó ningún resultado")
-            
-            logger.info(f"Encontradas {len(similar_tables)} de {len(results['ids'][0]) if results['ids'] and results['ids'][0] else 0} tablas que superan threshold {config.rag.similarity_threshold}")
+                })
+
+            # Ordenar por similitud descendente
+            similarities.sort(key=lambda x: x['similarity'], reverse=True)
+
+            # Filtrar por threshold y limitar a top_k
+            similar_tables = [
+                table for table in similarities
+                if table['similarity'] >= config.rag.similarity_threshold
+            ][:top_k]
+
+            logger.info(f"🔍 Encontradas {len(similar_tables)} de {len(similarities)} tablas que superan threshold {config.rag.similarity_threshold}")
+
+            for table in similar_tables[:5]:  # Log top 5
+                logger.debug(f"  ✓ {table['table_name']}: {table['similarity']:.3f}")
+
             return similar_tables
-            
+
         except Exception as e:
-            logger.error("Error buscando tablas similares", e)
+            logger.error(f"❌ Error buscando tablas similares: {e}")
             return []
-    
+
     def get_collection_stats(self) -> Dict[str, Any]:
         """Obtener estadísticas de la colección."""
         if not self._initialized:
             return {}
-        
-        try:
-            count = self.collection.count()
-            return {
-                'total_tables': count,
-                'collection_name': 'schema_embeddings',
-                'initialized': self._initialized
-            }
-        except Exception as e:
-            logger.error("Error obteniendo estadísticas de colección", e)
-            return {}
+
+        return {
+            'total_tables': len(self.embeddings_data),
+            'storage_type': 'JSON + numpy',
+            'initialized': self._initialized,
+            'storage_path': self.storage_path
+        }
 
 
 class SchemaManager:
@@ -1282,14 +1260,14 @@ class SchemaManager:
                 logger.info(f"🧠 Procesando TODAS las tablas para embeddings ({len(full_schema)} tablas)...")
                 table_embeddings = self._process_tables_for_embeddings(full_schema, max_tables=None)
             
-            # Agregar embeddings al almacén vectorial (degradar si falla Chroma)
+            # Agregar embeddings al almacén vectorial
             try:
-                logger.info("💾 Guardando embeddings en ChromaDB...")
+                logger.info("💾 Guardando embeddings en almacén vectorial...")
                 self.vector_store.add_table_embeddings(table_embeddings)
-                logger.info("✅ ChromaDB actualizado")
+                logger.info("✅ Embeddings guardados correctamente")
             except Exception as e:
-                logger.warning(f"⚠️ ChromaDB no disponible, continúo sin vector store: {e}")
-                # No borrar table_embeddings si falla ChromaDB
+                logger.warning(f"⚠️ Error guardando embeddings, continúo sin persistencia: {e}")
+                # No borrar table_embeddings si falla el guardado
             
             # Identificar tablas activas
             active_tables = self._identify_active_tables(full_schema)
