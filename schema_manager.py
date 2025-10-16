@@ -22,25 +22,141 @@ from database import db, TableInfo
 from utils import logger, timing_decorator, cache_manager, DataFormatter
 
 
-# Diccionario de semántica de columnas para enriquecer el contexto RAG
+# ============================================================================
+# DICCIONARIO DE SEMÁNTICA DE COLUMNAS PARA ENRIQUECER CONTEXTO RAG
+# ============================================================================
+# Este diccionario proporciona contexto semántico detallado de columnas comunes
+# en bases de datos de MicroSIP para mejorar la generación de SQL por IA.
+# Incluye: valores válidos, casos especiales, relaciones FK, y ejemplos de uso.
+# ============================================================================
+
 COLUMN_SEMANTICS = {
-    'CVE_ART': 'Código de artículo (puede contener valores especiales como GLOBAL, CORTE)',
-    'DESCRIPCION1': 'Descripción principal (puede incluir artículos de sistema como VENTA GLOBAL)',
-    'TIPO_DOCTO': 'Tipo de documento (F=Factura, T=Ticket, D=Devolución)',
-    'UNIDADES': 'Cantidad vendida (debe ser > 0 para ventas reales)',
-    'IMPORTE': 'Valor monetario (debe ser > 0 para transacciones válidas)',
-    'FECHA': 'Fecha de la transacción (formato DATE)',
-    'FOLIO': 'Número de documento (no confundir con SERIE)',
-    'CLIENTE_ID': 'Identificador único del cliente',
-    'ARTICULO_ID': 'Identificador único del artículo',
-    'ALMACEN_ID': 'Identificador del almacén',
-    'PROVEEDOR_ID': 'Identificador del proveedor',
-    'NOMBRE': 'Nombre del artículo o entidad (verificar si contiene palabras de sistema)',
-    'EXISTENCIA': 'Cantidad disponible en inventario',
-    'PRECIO': 'Precio unitario del artículo',
-    'COSTO': 'Costo del artículo para compras',
-    'SERIE': 'Campo especial - NO existe en DOCTOS_PV, DOCTOS_VE, DOCTOS_CC (solo TIPO_DOCTO + FOLIO)',
-    'FECHA_DOCUMENTO': 'Campo especial - NO existe en DOCTOS_PV, DOCTOS_VE (solo FECHA)',
+    # ===== IDENTIFICADORES Y CLAVES PRIMARIAS =====
+    'ARTICULO_ID': 'PK: Identificador único de artículo. FK en DOCTOS_PV_DET, DOCTOS_VE_DET, DOCTOS_CM_DET, DOCTOS_IN_DET, PRECIOS_ARTICULOS. Usar para JOIN con tabla ARTICULOS. Consultas: COUNT(DISTINCT ARTICULO_ID) para contar productos únicos',
+    'CLIENTE_ID': 'PK: Identificador único de cliente. FK en DOCTOS_PV, DOCTOS_VE, DOCTOS_CC. Usar para JOIN con tabla CLIENTES. Filtrar CLIENTE_ID > 0 para excluir clientes especiales',
+    'PROVEEDOR_ID': 'PK: Identificador único de proveedor. FK en DOCTOS_CM, PRECIOS_COMPRA. Usar para JOIN con tabla PROVEEDORES',
+    'EMPLEADO_ID': 'PK: Identificador único de empleado. FK en DOCTOS_PV, NOMINAS, PAGOS_NOMINA. Usar para JOIN con tabla EMPLEADOS',
+    'ALMACEN_ID': 'PK: Identificador único de almacén. FK en DOCTOS_IN_DET, SALDOS_IN, TRASPASOS_IN. Usar para JOIN con tabla ALMACENES',
+    'SUCURSAL_ID': 'PK: Identificador de sucursal. FK en DOCTOS_PV, DOCTOS_VE, DOCTOS_CM. Usar para JOIN con tabla SUCURSALES para análisis multisucursal',
+    'AGENTE_ID': 'PK: Identificador de agente/vendedor. FK en DOCTOS_PV, DOCTOS_VE, CLIENTES. Usar para análisis de desempeño por vendedor',
+    'LINEA_ARTICULO_ID': 'PK: Identificador de línea de productos. FK en ARTICULOS. Usar para JOIN con LINEAS_ARTICULOS para agrupar por categoría',
+
+    # ===== CLAVES Y CÓDIGOS ALFANUMÉRICOS =====
+    'CVE_ART': 'Código alfanumérico de artículo (VARCHAR). IMPORTANTE: puede contener valores especiales del sistema como "GLOBAL", "CORTE", "VENTA GLOBAL". Filtrar WHERE CVE_ART NOT LIKE "%GLOBAL%" para excluir artículos de sistema. Usar para búsquedas por código',
+    'CVE_CLPV': 'Código de cliente en Punto de Venta (VARCHAR). Similar a CVE_ART, puede tener valores especiales como "MOSTRADOR", "PUBLICO GENERAL". Filtrar clientes mostrador si se necesitan clientes reales',
+    'FOLIO': 'Número de documento/factura (INTEGER). Usar con TIPO_DOCTO para identificar documentos únicos. Ejemplo: WHERE TIPO_DOCTO = "F" AND FOLIO BETWEEN 1000 AND 2000',
+    'UUID': 'Folio fiscal del SAT (VARCHAR 36). Identificador único de CFDI para facturación electrónica. NULL = documento sin timbrar',
+
+    # ===== TIPOS Y ESTADOS =====
+    'TIPO_DOCTO': 'Tipo de documento (CHAR 1). Valores: F=Factura, T=Ticket, D=Devolución, N=Nota de crédito, P=Pedido, C=Cotización. Usar para filtrar por tipo de transacción. Ejemplo: WHERE TIPO_DOCTO IN ("F", "T") para ventas válidas',
+    'ESTATUS': 'Estado del registro (CHAR 1). Valores comunes: A=Activo, I=Inactivo, S=Suspendido, C=Cancelado. Usar WHERE ESTATUS = "A" para registros activos. Crítico para contar elementos válidos',
+    'STATUS_DOCTO': 'Estado del documento (VARCHAR). Valores: CONCLUIDO, PENDIENTE, CANCELADO, BORRADOR. Filtrar CANCELADO para transacciones válidas',
+    'APLICADO': 'Indicador de aplicación contable (CHAR 1). S=Aplicado, N=No aplicado. Filtrar WHERE APLICADO = "S" para documentos contabilizados',
+    'CANCELADO': 'Indicador de cancelación (CHAR 1). S=Cancelado, N=Vigente. IMPORTANTE: Filtrar WHERE CANCELADO = "N" para transacciones válidas',
+
+    # ===== NOMBRES Y DESCRIPCIONES =====
+    'NOMBRE': 'Nombre descriptivo (VARCHAR). ADVERTENCIA: puede contener valores de sistema como "VENTA GLOBAL", "CORTE DE CAJA", "AJUSTE INVENTARIO". Filtrar WHERE NOMBRE NOT LIKE "%GLOBAL%" AND NOMBRE NOT LIKE "%CORTE%" para datos reales',
+    'DESCRIPCION1': 'Descripción principal del artículo (VARCHAR). Igual que NOMBRE, puede incluir artículos de sistema. Usar para búsquedas de texto con LIKE',
+    'DESCRIPCION2': 'Descripción secundaria del artículo (VARCHAR). Información adicional del producto',
+    'RAZON_SOCIAL': 'Razón social de cliente/proveedor (VARCHAR). Nombre fiscal para facturación',
+
+    # ===== CANTIDADES Y UNIDADES =====
+    'UNIDADES': 'Cantidad de unidades en la transacción (DECIMAL). IMPORTANTE: Debe ser > 0 para ventas/compras reales. Valores negativos = devoluciones. Usar SUM(UNIDADES) para totales',
+    'CANTIDAD': 'Cantidad genérica (DECIMAL). Similar a UNIDADES. Verificar > 0 para transacciones válidas',
+    'EXISTENCIA': 'Cantidad disponible en inventario (DECIMAL). Usar para consultas de stock disponible. Puede ser negativo en casos de sobregiro',
+    'UNIDAD_VENTA': 'Unidad de medida para ventas (VARCHAR). Ej: PZA, KG, LT, M, CAJA',
+    'UNIDAD_COMPRA': 'Unidad de medida para compras (VARCHAR). Puede diferir de UNIDAD_VENTA',
+    'CONTENIDO_UNIDAD_COMPRA': 'Factor de conversión entre unidad de compra y venta (INTEGER). Ej: 1 CAJA = 12 PZA',
+
+    # ===== VALORES MONETARIOS =====
+    'IMPORTE': 'Monto total de la transacción (DECIMAL). CRÍTICO: Debe ser > 0 para transacciones válidas. Usar SUM(IMPORTE) para totales de ventas. Incluye impuestos según configuración',
+    'PRECIO': 'Precio unitario sin impuestos (DECIMAL). Usar para cálculos de precio promedio',
+    'PRECIO_TOTAL_NETO': 'Precio con todos los descuentos aplicados (DECIMAL). Usar para cálculo de márgenes',
+    'COSTO': 'Costo unitario del artículo (DECIMAL). Usar para cálculo de utilidad bruta',
+    'COSTO_PROMEDIO': 'Costo promedio ponderado (DECIMAL). Método de valuación UEPS/PEPS',
+    'SUBTOTAL': 'Subtotal antes de impuestos (DECIMAL). SUBTOTAL + IMPUESTOS = TOTAL',
+    'TOTAL': 'Monto total con impuestos (DECIMAL). Monto final pagado/cobrado',
+    'IMPUESTOS': 'Suma de IVA + IEPS + otros impuestos (DECIMAL). Desglosar si necesitas impuestos específicos',
+    'IVA': 'Impuesto al Valor Agregado (DECIMAL). Generalmente 16% en México',
+    'DESCUENTO': 'Descuento aplicado en importe (DECIMAL). Puede ser monto fijo o porcentaje',
+    'PCTJE_DESCUENTO': 'Porcentaje de descuento (DECIMAL 0-100). 0 = sin descuento',
+
+    # ===== FECHAS Y TIEMPOS =====
+    'FECHA': 'Fecha de la transacción (DATE). Usar para filtros temporales. Formato: YYYY-MM-DD. Ejemplo: WHERE FECHA >= CURRENT_DATE - 30 para últimos 30 días',
+    'FECHA_HORA': 'Fecha y hora exacta (TIMESTAMP). Más preciso que FECHA para análisis por hora del día',
+    'FECHA_HORA_CREACION': 'Timestamp de creación del registro (TIMESTAMP). Útil para auditoría',
+    'FECHA_HORA_ULT_MODIF': 'Timestamp de última modificación (TIMESTAMP). Para tracking de cambios',
+    'FECHA_ENTREGA': 'Fecha comprometida de entrega (DATE). Para pedidos y órdenes',
+    'FECHA_VENCIMIENTO': 'Fecha de vencimiento de pago/documento (DATE). Para CxC y CxP',
+    'FECHA_SUSP': 'Fecha de suspensión (DATE). Si tiene valor, el registro está suspendido',
+    'YEAR': 'Año fiscal (INTEGER). Para reportes anuales sin necesidad de EXTRACT(YEAR FROM FECHA)',
+    'MONTH': 'Mes (INTEGER 1-12). Para análisis mensual',
+
+    # ===== PRECIOS Y LISTAS =====
+    'PRECIO_LISTA': 'Precio de lista oficial (DECIMAL). Precio base antes de descuentos',
+    'PRECIO_PUBLICO': 'Precio al público general (DECIMAL). Generalmente incluye IVA',
+    'PRECIO_ECONOMICO': 'Precio promocional (DECIMAL). Precio especial o de oferta',
+    'LISTA_PRECIOS': 'Identificador de lista de precios (VARCHAR). Ej: GENERAL, MAYOREO, DISTRIBUIDOR',
+    'ES_PRECIO_VARIABLE': 'Indicador de precio variable (CHAR). S=Precio se puede modificar, N=Precio fijo',
+
+    # ===== CAMPOS CALCULADOS Y AGREGADOS =====
+    'UTILIDAD': 'Utilidad bruta (DECIMAL). Generalmente = PRECIO - COSTO o calculado dinámicamente',
+    'PCTJE_UTILIDAD': 'Porcentaje de utilidad (DECIMAL). = (PRECIO - COSTO) / COSTO * 100',
+    'SALDO': 'Saldo pendiente (DECIMAL). En CxC/CxP, TOTAL - PAGOS = SALDO',
+    'IMPORTE_PAGADO': 'Monto ya pagado (DECIMAL). Para control de pagos parciales',
+    'IMPORTE_PENDIENTE': 'Monto pendiente de pago (DECIMAL). = TOTAL - IMPORTE_PAGADO',
+
+    # ===== UBICACIÓN Y GEOGRAFÍA =====
+    'CODIGO_POSTAL': 'Código postal (VARCHAR). Para análisis geográfico',
+    'CIUDAD': 'Ciudad (VARCHAR). Para segmentación por ubicación',
+    'ESTADO': 'Estado/Provincia (VARCHAR). Usar con cuidado, puede confundirse con ESTATUS',
+    'PAIS': 'País (VARCHAR). Para ventas internacionales',
+    'ZONA': 'Zona de ventas (VARCHAR). Segmentación comercial',
+    'RUTA': 'Ruta de reparto (VARCHAR). Para logística',
+
+    # ===== FISCALES Y LEGALES =====
+    'RFC': 'Registro Federal de Contribuyentes (VARCHAR 13). Identificador fiscal en México',
+    'REGIMEN_FISCAL': 'Régimen fiscal del contribuyente (VARCHAR). Ej: 601, 612, 626',
+    'USO_CFDI': 'Uso del CFDI (VARCHAR). Ej: G01, G03, P01 según catálogo SAT',
+    'FORMA_PAGO': 'Forma de pago SAT (VARCHAR). Ej: 01=Efectivo, 03=Transferencia, 04=Tarjeta',
+    'METODO_PAGO': 'Método de pago SAT (VARCHAR). PUE=Pago en una exhibición, PPD=Pago diferido',
+
+    # ===== CAMPOS DE AUDITORÍA =====
+    'USUARIO_CREADOR': 'Usuario que creó el registro (VARCHAR). Para auditoría de operaciones',
+    'USUARIO_ULT_MODIF': 'Usuario que modificó por última vez (VARCHAR). Tracking de cambios',
+    'USUARIO_AUT_CREACION': 'Usuario que autorizó la creación (VARCHAR). Para procesos con autorización',
+    'USUARIO_CANCELACION': 'Usuario que canceló el documento (VARCHAR). Si tiene valor, doc está cancelado',
+
+    # ===== RELACIONES Y REFERENCIAS =====
+    'DOCTO_PV_ID': 'FK a documento de punto de venta. Usar para JOIN con DOCTOS_PV (encabezado)',
+    'DOCTO_VE_ID': 'FK a documento de ventas. Usar para JOIN con DOCTOS_VE',
+    'DOCTO_CM_ID': 'FK a documento de compras. Usar para JOIN con DOCTOS_CM',
+    'DOCTO_CC_ID': 'FK a documento de CxC. Usar para JOIN con DOCTOS_CC',
+    'MOVTO_ID': 'FK a movimiento de inventario. Usar para JOIN con DOCTOS_IN',
+    'PARTIDA': 'Número de partida/línea en detalle (INTEGER). Para identificar líneas en _DET',
+
+    # ===== INDICADORES BOOLEANOS (CHAR 1) =====
+    'ES_ALMACENABLE': 'Indicador si el artículo es almacenable (CHAR). S=Sí almacenable, N=Servicio/No almacenable',
+    'ES_JUEGO': 'Indicador si es un juego/kit (CHAR). S=Kit de productos, N=Producto simple',
+    'ES_PESO_VARIABLE': 'Indicador de peso variable (CHAR). S=Se vende por peso (ej: carnes), N=Peso fijo',
+    'ES_IMPORTADO': 'Indicador de producto importado (CHAR). S=Importado, N=Nacional',
+    'INCLUYE_IMPUESTO': 'Indicador si precio incluye IVA (CHAR). S=Precio con IVA, N=Precio sin IVA',
+    'APLICA_COMISION': 'Indicador si aplica comisión a vendedor (CHAR). S=Comisionable, N=Sin comisión',
+
+    # ===== CAMPOS ESPECIALES Y ADVERTENCIAS =====
+    'SERIE': 'ADVERTENCIA: NO existe en DOCTOS_PV, DOCTOS_VE, DOCTOS_CC. Usar solo TIPO_DOCTO + FOLIO. En otras tablas, Serie de documento',
+    'FECHA_DOCUMENTO': 'ADVERTENCIA: NO existe en DOCTOS_PV, DOCTOS_VE. Usar solo FECHA',
+    'GRUPO_ARTICULO_ID': 'FK a grupo de artículos. DIFERENTE de LINEA_ARTICULO_ID. Subclasificación dentro de línea',
+    'FAMILIA_ARTICULO_ID': 'FK a familia de artículos. Nivel superior a LINEA. Jerarquía: FAMILIA > LINEA > GRUPO',
+
+    # ===== CONSULTAS COMUNES Y EJEMPLOS =====
+    '__QUERY_EXAMPLES': {
+        'ventas_periodo': 'SELECT SUM(IMPORTE) FROM DOCTOS_PV WHERE FECHA BETWEEN X AND Y AND CANCELADO = "N"',
+        'articulos_activos': 'SELECT COUNT(*) FROM ARTICULOS WHERE ESTATUS = "A"',
+        'top_clientes': 'SELECT CLIENTE_ID, SUM(IMPORTE) FROM DOCTOS_PV WHERE CANCELADO = "N" GROUP BY CLIENTE_ID ORDER BY 2 DESC FIRST 10',
+        'inventario_bajo': 'SELECT ARTICULO_ID, EXISTENCIA FROM SALDOS_IN WHERE EXISTENCIA < MINIMO',
+        'productos_vendidos': 'SELECT COUNT(DISTINCT ARTICULO_ID) FROM DOCTOS_PV_DET WHERE DOCTO_PV_ID IN (SELECT DOCTO_PV_ID FROM DOCTOS_PV WHERE CANCELADO = "N")',
+    }
 }
 
 
@@ -192,12 +308,17 @@ class TableDescriptor:
         if key_fields_desc:
             description_parts.append(key_fields_desc)
 
-        # === PARTE 6: METADATOS TÉCNICOS (menos peso para embeddings) ===
+        # === PARTE 6: PATRONES DE CONSULTA SQL COMUNES ===
+        query_patterns = cls._generate_query_patterns(table_info.name, table_info.columns, table_info.primary_keys)
+        if query_patterns:
+            description_parts.append(query_patterns)
+
+        # === PARTE 7: METADATOS TÉCNICOS (menos peso para embeddings) ===
         if table_info.row_count > 0:
             volume_desc = cls._describe_data_volume(table_info.row_count)
             description_parts.append(f"Volumen: {volume_desc}")
 
-        # === PARTE 7: OPTIMIZACIÓN PARA EMBEDDINGS ===
+        # === PARTE 8: OPTIMIZACIÓN PARA EMBEDDINGS ===
         # Unir con separadores optimizados para modelos de embeddings
         # El separador " | " ayuda a que el modelo sentence-transformer
         # mantenga la estructura semántica de cada segmento
@@ -397,47 +518,108 @@ class TableDescriptor:
 
     @staticmethod
     def _describe_relationships(foreign_keys: List[Dict[str, Any]]) -> str:
-        """Describir relaciones en lenguaje de negocio."""
+        """
+        Describir relaciones FK en lenguaje de negocio con DETALLES EXPLÍCITOS.
+        CRÍTICO: Esto ayuda a la IA a generar JOINs correctos.
+        """
         if not foreign_keys:
             return ""
 
         relationships = []
-        for fk in foreign_keys[:5]:  # Primeras 5 FKs
+        for fk in foreign_keys[:8]:  # Aumentado a 8 FKs para más contexto
             ref_table = fk.get('referenced_table', '')
             columns = fk.get('columns', [])
+            ref_columns = fk.get('referenced_columns', [])
 
             if ref_table and columns:
+                col_name = columns[0] if columns else ''
+                ref_col_name = ref_columns[0] if ref_columns else ''
+                col_lower = col_name.lower()
+
+                # FORMATO MEJORADO: Incluir columnas explícitas para JOINs
+                # Ejemplo: "FK: ARTICULO_ID → ARTICULOS.ARTICULO_ID (productos)"
+
                 # Traducir a lenguaje de negocio
-                col_name = columns[0].lower() if columns else ''
-                if 'cliente' in col_name:
-                    relationships.append(f"vinculada a clientes ({ref_table})")
-                elif 'articulo' in col_name or 'producto' in col_name:
-                    relationships.append(f"vinculada a productos ({ref_table})")
-                elif 'proveedor' in col_name:
-                    relationships.append(f"vinculada a proveedores ({ref_table})")
-                elif 'almacen' in col_name:
-                    relationships.append(f"vinculada a almacenes ({ref_table})")
+                if 'cliente' in col_lower:
+                    business_name = "clientes"
+                elif 'articulo' in col_lower or 'producto' in col_lower:
+                    business_name = "productos"
+                elif 'proveedor' in col_lower:
+                    business_name = "proveedores"
+                elif 'almacen' in col_lower:
+                    business_name = "almacenes"
+                elif 'empleado' in col_lower or 'vendedor' in col_lower:
+                    business_name = "empleados"
+                elif 'sucursal' in col_lower:
+                    business_name = "sucursales"
+                elif 'docto' in col_lower or 'documento' in col_lower:
+                    business_name = "documentos"
                 else:
-                    relationships.append(f"relacionada con {ref_table}")
+                    business_name = ref_table.lower().replace('_', ' ')
+
+                # Formato explícito con columnas para ayudar en generación de SQL
+                if ref_col_name:
+                    relationships.append(f"FK: {col_name} → {ref_table}.{ref_col_name} ({business_name})")
+                else:
+                    relationships.append(f"FK: {col_name} → {ref_table} ({business_name})")
 
         if relationships:
-            return "Relaciones: " + ", ".join(relationships)
+            return "Relaciones: " + " | ".join(relationships)
         return ""
 
     @staticmethod
     def _describe_key_fields(columns: List[Dict[str, Any]], primary_keys: List[str]) -> str:
-        """Describir campos clave de manera semántica."""
+        """
+        Describir campos clave con contexto semántico EXPLÍCITO.
+        Incluye PK, campos obligatorios, y su propósito.
+        """
         key_desc = []
 
-        # Primary keys
+        # Primary keys con tipo de dato
         if primary_keys:
-            key_desc.append(f"Clave: {', '.join(primary_keys[:3])}")
+            pk_info = []
+            for pk in primary_keys[:3]:
+                pk_col = next((c for c in columns if c['name'] == pk), None)
+                if pk_col:
+                    data_type = pk_col.get('data_type', 'UNKNOWN')
+                    pk_info.append(f"{pk} ({data_type})")
+            key_desc.append(f"PK: {', '.join(pk_info)}")
 
-        # Campos requeridos importantes (NOT NULL)
-        required = [col['name'] for col in columns if not col.get('nullable', True)]
-        important_required = [r for r in required if r not in primary_keys and len(r) < 25][:5]
+        # Campos requeridos importantes (NOT NULL) con contexto
+        required = [col for col in columns if not col.get('nullable', True)]
+        important_required = [col for col in required if col['name'] not in primary_keys and len(col['name']) < 30][:6]
+
         if important_required:
-            key_desc.append(f"Obligatorios: {', '.join(important_required)}")
+            req_names = []
+            for col in important_required:
+                col_name = col['name']
+                col_lower = col_name.lower()
+
+                # Agregar contexto semántico a campos importantes
+                if 'estatus' in col_lower or 'status' in col_lower:
+                    req_names.append(f"{col_name} (estado/filtrar activos)")
+                elif 'cancelado' in col_lower:
+                    req_names.append(f"{col_name} (filtrar cancelados)")
+                elif 'nombre' in col_lower or 'descripcion' in col_lower:
+                    req_names.append(f"{col_name} (identificación)")
+                elif 'fecha' in col_lower:
+                    req_names.append(f"{col_name} (temporal)")
+                elif 'tipo' in col_lower:
+                    req_names.append(f"{col_name} (clasificación)")
+                else:
+                    req_names.append(col_name)
+
+            key_desc.append(f"Obligatorios: {', '.join(req_names)}")
+
+        # Índices importantes para búsquedas comunes
+        search_fields = []
+        for col in columns[:15]:  # Primeras 15 columnas
+            col_lower = col['name'].lower()
+            if any(k in col_lower for k in ['codigo', 'cve_', 'folio', 'numero']):
+                search_fields.append(col['name'])
+
+        if search_fields and len(search_fields) <= 4:
+            key_desc.append(f"Búsqueda por: {', '.join(search_fields)}")
 
         return " | ".join(key_desc)
 
@@ -456,6 +638,82 @@ class TableDescriptor:
             return f"volumen muy alto ({DataFormatter.format_number(row_count)} registros)"
 
     @staticmethod
+    def _generate_query_patterns(table_name: str, columns: List[Dict[str, Any]], primary_keys: List[str]) -> str:
+        """
+        Generar patrones de consulta SQL comunes para esta tabla.
+        CRÍTICO: Esto entrena a la IA con ejemplos de cómo consultar cada tabla.
+        """
+        name_lower = table_name.lower()
+        col_names = {col['name'].lower(): col['name'] for col in columns}
+        patterns = []
+
+        # === PATRONES PARA TABLAS DE VENTAS ===
+        if any(k in name_lower for k in ['doctos_pv', 'ventas', 'factura', 'ticket']):
+            if 'fecha' in col_names and 'importe' in col_names:
+                patterns.append("Ventas por período: SUM(IMPORTE) WHERE FECHA BETWEEN X AND Y")
+            if 'cancelado' in col_names:
+                patterns.append("Filtrar cancelados: WHERE CANCELADO = 'N'")
+            if 'cliente_id' in col_names:
+                patterns.append("Ventas por cliente: GROUP BY CLIENTE_ID")
+            if 'tipo_docto' in col_names:
+                patterns.append("Por tipo: WHERE TIPO_DOCTO IN ('F', 'T')")
+
+        # === PATRONES PARA DETALLE DE VENTAS ===
+        elif '_det' in name_lower and any(k in name_lower for k in ['pv', 'ventas']):
+            if 'articulo_id' in col_names and 'unidades' in col_names:
+                patterns.append("Productos vendidos: COUNT(DISTINCT ARTICULO_ID)")
+                patterns.append("Unidades totales: SUM(UNIDADES)")
+            if 'docto_pv_id' in col_names:
+                patterns.append("JOIN con encabezado: JOIN DOCTOS_PV ON DOCTO_PV_ID")
+
+        # === PATRONES PARA ARTÍCULOS/PRODUCTOS ===
+        elif any(k in name_lower for k in ['articulo', 'producto']):
+            if 'estatus' in col_names:
+                patterns.append("Activos: WHERE ESTATUS = 'A'")
+                patterns.append("Contar activos: COUNT(*) WHERE ESTATUS = 'A'")
+            if 'nombre' in col_names:
+                patterns.append("Buscar por nombre: WHERE NOMBRE LIKE '%texto%'")
+            if 'linea_articulo_id' in col_names:
+                patterns.append("Por línea: GROUP BY LINEA_ARTICULO_ID")
+            if 'precio' in col_names:
+                patterns.append("Rango de precio: WHERE PRECIO BETWEEN X AND Y")
+
+        # === PATRONES PARA CLIENTES ===
+        elif any(k in name_lower for k in ['cliente']):
+            if 'estatus' in col_names:
+                patterns.append("Clientes activos: WHERE ESTATUS = 'A'")
+            if 'nombre' in col_names or 'razon_social' in col_names:
+                patterns.append("Buscar: WHERE NOMBRE LIKE '%texto%'")
+            if 'rfc' in col_names:
+                patterns.append("Por RFC: WHERE RFC = 'XXXX'")
+
+        # === PATRONES PARA INVENTARIO ===
+        elif any(k in name_lower for k in ['inventario', 'existencia', 'saldo']):
+            if 'existencia' in col_names:
+                patterns.append("Stock bajo: WHERE EXISTENCIA < MINIMO")
+                patterns.append("Stock total: SUM(EXISTENCIA)")
+            if 'articulo_id' in col_names and 'almacen_id' in col_names:
+                patterns.append("Por almacén: GROUP BY ALMACEN_ID")
+
+        # === PATRONES GENÉRICOS PARA TABLAS CON FECHA ===
+        if 'fecha' in col_names and not patterns:
+            patterns.append("Últimos 30 días: WHERE FECHA >= CURRENT_DATE - 30")
+            patterns.append("Por mes: WHERE EXTRACT(MONTH FROM FECHA) = X")
+
+        # === PATRONES GENÉRICOS PARA TABLAS CON ESTATUS ===
+        if 'estatus' in col_names and not patterns:
+            patterns.append("Activos: WHERE ESTATUS = 'A'")
+
+        # === CONTEOS GENÉRICOS ===
+        if primary_keys and not patterns:
+            pk = primary_keys[0]
+            patterns.append(f"Contar registros: COUNT({pk})")
+
+        if patterns:
+            return "Consultas típicas: " + " | ".join(patterns[:5])  # Máximo 5 patrones
+        return ""
+
+    @staticmethod
     def _generate_search_terms(table_name: str, columns: List[Dict[str, Any]]) -> str:
         """
         Generar términos de búsqueda adicionales y sinónimos para mejorar recuperación.
@@ -469,7 +727,7 @@ class TableDescriptor:
         synonyms_map = {
             'venta': ['vender', 'vendido', 'transacción', 'ingreso', 'ticket', 'factura', 'cobro'],
             'cliente': ['comprador', 'consumidor', 'usuario final', 'socio comercial'],
-            'articulo': ['producto', 'mercancía', 'ítem', 'SKU', 'inventario'],
+            'articulo': ['producto', 'mercancía', 'ítem', 'SKU', 'inventario', 'activo', 'activos', 'disponible'],
             'proveedor': ['vendor', 'supplier', 'abastecedor', 'distribuidor'],
             'inventario': ['existencia', 'stock', 'almacén', 'bodega', 'disponible'],
             'compra': ['adquisición', 'orden de compra', 'procurement', 'abastecimiento'],
@@ -483,7 +741,14 @@ class TableDescriptor:
         # Agregar sinónimos basados en el nombre de la tabla
         for key, synonyms in synonyms_map.items():
             if key in name_lower:
-                search_terms.update(synonyms[:4])  # Máximo 4 sinónimos por categoría
+                search_terms.update(synonyms[:8])  # Aumentado para incluir más términos
+
+        # NUEVO: Términos de consulta y agregación para TODAS las tablas
+        search_terms.update(['cuántos', 'cuantos', 'cantidad de', 'total de', 'contar', 'listar', 'mostrar', 'registros', 'elementos'])
+
+        # NUEVO: Si tiene columna ESTATUS o similar, agregar términos de estado
+        if any('estatus' in col or 'status' in col or 'activo' in col or 'active' in col for col in col_names):
+            search_terms.update(['activo', 'activos', 'vigente', 'vigentes', 'disponible', 'disponibles', 'inactivo', 'inactivos'])
 
         # Sinónimos por columnas presentes
         if any('fecha' in col or 'date' in col for col in col_names):
@@ -493,7 +758,7 @@ class TableDescriptor:
             search_terms.update(['financiero', 'monetario', 'económico'])
 
         if any('cantidad' in col or 'unidades' in col for col in col_names):
-            search_terms.update(['volumen', 'conteo', 'suma'])
+            search_terms.update(['volumen', 'conteo', 'suma', 'total'])
 
         # Términos de análisis comunes
         if 'det' in name_lower or 'detalle' in name_lower:
@@ -502,8 +767,8 @@ class TableDescriptor:
         if any(k in name_lower for k in ['encab', 'header', 'docto']):
             search_terms.update(['documento', 'cabecera', 'resumen'])
 
-        # Limitar a los términos más relevantes
-        return ', '.join(list(search_terms)[:15])
+        # Limitar a los términos más relevantes (aumentado para incluir términos de consulta)
+        return ', '.join(list(search_terms)[:25])
 
     @staticmethod
     def _infer_table_purpose(table_name: str) -> Optional[str]:

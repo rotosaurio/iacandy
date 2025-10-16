@@ -993,7 +993,6 @@ class ResultAnalyzer:
     def _prepare_data_summary(self, query_result: QueryResult) -> str:
         """Preparar resumen de datos para análisis."""
         summary_parts = [
-            f"Consulta ejecutada: {query_result.sql}",
             f"Registros encontrados: {DataFormatter.format_number(query_result.row_count)}",
             f"Tiempo de ejecución: {DataFormatter.format_duration(query_result.execution_time)}",
             f"Columnas: {', '.join(query_result.columns)}"
@@ -1042,14 +1041,20 @@ class ResultAnalyzer:
 5. **Detección de Anomalías**: Identifica valores atípicos o datos sospechosos
 6. **Análisis Comparativo**: Compara con períodos anteriores o benchmarks
 
-INSTRUCCIONES:
-1. Responde en español, de forma clara pero profunda
-2. Genera insights que vayan más allá de lo obvio
-3. Menciona patrones, tendencias, anomalías y oportunidades
-4. Explica en términos de negocio y valor empresarial
-5. Si hay muchos registros, destaca los más importantes y el por qué
-6. Sugiere análisis complementarios que aporten valor adicional
-7. Usa emojis apropiados para destacar puntos clave (📊 📈 📉 💰 ⚠️ 💡)"""
+INSTRUCCIONES CRÍTICAS:
+1. **SIEMPRE empieza con un resumen claro del resultado principal** (ej: "Encontré 18,941 artículos activos en el sistema")
+2. Responde en español, de forma clara pero profunda
+3. Genera insights que vayan más allá de lo obvio
+4. Menciona patrones, tendencias, anomalías y oportunidades
+5. Explica en términos de negocio y valor empresarial
+6. Si hay muchos registros, destaca los más importantes y el por qué
+7. Sugiere análisis complementarios que aporten valor adicional
+8. Usa emojis apropiados para destacar puntos clave (📊 📈 📉 💰 ⚠️ 💡)
+
+FORMATO ESPERADO:
+- Primera línea: Resumen claro y directo del resultado (ej: "📊 Hay **18,941 artículos activos** en tu inventario")
+- Luego: Análisis detallado, contexto y recomendaciones
+- NO incluyas la consulta SQL en tu respuesta (ya se mostrará por separado)"""
 
             messages = [
                 {"role": "system", "content": system_prompt},
@@ -1059,7 +1064,7 @@ Pregunta del usuario: {user_question}
 Resumen de resultados:
 {data_summary}
 
-Por favor, analiza estos resultados y proporciona insights útiles."""}
+Por favor, analiza estos resultados y proporciona insights útiles. Recuerda empezar con un resumen claro del resultado principal."""}
             ]
             
             # Usar modelo principal para análisis de resultados
@@ -1572,7 +1577,7 @@ class AIAssistant:
                 response_message += f"\n\n⏱️ Tiempo de ejecución: {execution_time:.1f}s"
             
             # Agregar SQL generado al final del mensaje para que el usuario pueda verlo y probarlo
-            response_message += f"\n\n🔍 **Consulta SQL generada:**\n```sql\n{sql_query}\n```"
+            response_message += f"\n\n---\n\n🔍 **Consulta SQL generada:**\n```sql\n{sql_query}\n```"
 
             if query_result.has_more_data:
                 logger.info(f"📋 [SQL_QUERY] Hay más datos disponibles: {query_result.has_more_data}")
