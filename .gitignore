@@ -77,11 +77,10 @@ Thumbs.db
 .env
 config_local.py
 
-#chroma_db 
-chroma/
-*.db
-*.sqlite
-*.sqlite3
-chroma_db/
-db/
-chroma-*
+# Solo ignorar datos temporales y caches innecesarios
+*.log
+temp/
+cache/
+
+# Permitir datos críticos de ChromaDB (chroma_db_openai contiene embeddings generados)
+# chroma_db_large puede ser regenerada si es necesario
