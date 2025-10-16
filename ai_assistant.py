@@ -348,6 +348,9 @@ Generas consultas SQL AVANZADAS, ULTRA-OPTIMIZADAS y con CAPACIDAD MULTI-TABLA E
 
 🎯 **PRIORIDAD ABSOLUTA: SIMPLICIDAD Y EFICIENCIA**
 
+🚨 **REGLA CRÍTICA PARA VENTAS EN MICROSIP**:
+- En consultas de ventas: Usa ÚNICAMENTE TIPO_DOCTO = 'V'. NUNCA agregues ESTATUS = 'A' o CANCELADO = 'N' - estos filtros NO aplican y causan errores.
+
 📌 **REGLAS DE ORO PARA QUERIES RÁPIDAS**:
 
 1. **SIMPLICIDAD PRIMERO** - Usa la query MÁS SIMPLE que responda la pregunta
@@ -393,6 +396,7 @@ SELECT FIRST 1
 FROM DOCTOS_PV_DET pvd
 INNER JOIN DOCTOS_PV pv ON pvd.DOCTO_PV_ID = pv.DOCTO_PV_ID
 WHERE pv.FECHA >= CURRENT_DATE - 90  -- Filtrar últimos 3 meses (más rápido)
+  AND pv.TIPO_DOCTO = 'V'  -- ← ÚNICO filtro requerido para ventas
 ORDER BY pv.FECHA DESC, pv.DOCTO_PV_ID DESC
 ```
 
@@ -415,6 +419,7 @@ FROM DOCTOS_PV pv
 INNER JOIN DOCTOS_PV_DET pvd ON pv.DOCTO_PV_ID = pvd.DOCTO_PV_ID
 WHERE pv.FECHA >= DATE '2025-10-01'
   AND pv.FECHA < DATE '2025-11-01'
+  AND pv.TIPO_DOCTO = 'V'  -- ← ÚNICO filtro requerido para ventas
 ```
 
 ❌ **ANTIPATRONES - EVITA ESTAS QUERIES LENTAS**:
@@ -497,6 +502,7 @@ INNER JOIN DOCTOS_PV_DET pvd ON pvd.DOCTO_PV_ID = pv.DOCTO_PV_ID
 LEFT JOIN ARTICULOS a ON a.ARTICULO_ID = pvd.ARTICULO_ID
 LEFT JOIN ALMACENES al ON al.ALMACEN_ID = pv.ALMACEN_ID
 WHERE pv.FECHA >= (SELECT MAX(FECHA) - 90 FROM DOCTOS_PV)  -- ⚡ Se adapta a BDs antiguas
+  AND pv.TIPO_DOCTO = 'V'  -- ← ÚNICO filtro requerido para ventas
   AND pvd.UNIDADES > 0
   AND pvd.PRECIO_TOTAL_NETO > 0
   AND (a.NOMBRE IS NULL OR (
@@ -524,6 +530,7 @@ LEFT JOIN ARTICULOS a ON a.ARTICULO_ID = pvd.ARTICULO_ID
 LEFT JOIN ALMACENES al ON al.ALMACEN_ID = pv.ALMACEN_ID
 WHERE pv.FECHA >= DATE '2025-02-01'      -- Fechas del usuario
   AND pv.FECHA < DATE '2025-03-01'       -- Fechas del usuario
+  AND pv.TIPO_DOCTO = 'V'  -- ← Tipo de documento para ventas
   AND pvd.UNIDADES > 0
   AND pvd.PRECIO_TOTAL_NETO > 0
   AND (a.NOMBRE IS NULL OR (
@@ -637,7 +644,7 @@ REGLAS DE FIREBIRD 3.0:
 
 **Ventas por cliente con total y cantidad:**
 ```sql
-SELECT 
+SELECT
     c.CLIENTE_ID,
     c.NOMBRE AS CLIENTE,
     COUNT(DISTINCT pv.DOCTO_PV_ID) AS TOTAL_FACTURAS,
@@ -647,6 +654,7 @@ FROM DOCTOS_PV pv
 INNER JOIN DOCTOS_PV_DET pvd ON pv.DOCTO_PV_ID = pvd.DOCTO_PV_ID
 INNER JOIN CLIENTES c ON pv.CLIENTE_ID = c.CLIENTE_ID
 WHERE pv.FECHA >= DATE '2025-01-01'
+  AND pv.TIPO_DOCTO = 'V'  -- ← Tipo de documento para ventas
 GROUP BY c.CLIENTE_ID, c.NOMBRE
 ORDER BY IMPORTE_TOTAL DESC
 ```
@@ -741,11 +749,17 @@ ORDER BY ANIO, MES
 }}
 ```
 
-⚠️ **MUY IMPORTANTE**: 
+⚠️ **MUY IMPORTANTE**:
 - Tu respuesta DEBE ser ÚNICAMENTE el objeto JSON de arriba
 - NO incluyas texto adicional antes o después del JSON
 - NO uses markdown, NO uses comillas triples
 - SOLO el JSON puro y válido
+
+🎯 **REGLAS ESPECÍFICAS PARA MICROSIP - CRÍTICAS**:
+- Para documentos de venta (DOCTOS_PV, DOCTOS_VE): NUNCA uses ESTATUS = 'A' ni CANCELADO = 'N'. Usa ÚNICAMENTE TIPO_DOCTO = 'V' para filtrar ventas.
+- TIPO_DOCTO para ventas: SIEMPRE 'V' (Venta). NUNCA uses 'F', 'T' u otros tipos para ventas estándar.
+- Filtros permitidos para ventas: SOLO TIPO_DOCTO = 'V', fechas (ej: FECHA BETWEEN '2025-09-01' AND '2025-09-30') y condiciones básicas (ej: UNIDADES > 0).
+- Ejemplo OBLIGATORIO para ventas: WHERE pv.TIPO_DOCTO = 'V' AND pv.FECHA BETWEEN '2025-09-01' AND '2025-09-30'
 
 Genera consultas COMPLEJAS, COMPLETAS y EFICIENTES que respondan exactamente lo que el usuario necesita.
 Aprovecha al máximo las capacidades de GPT-5 para crear queries óptimas y sofisticadas."""
@@ -780,6 +794,9 @@ Aprovecha al máximo las capacidades de GPT-5 para crear queries óptimas y sofi
                         "role": "system",
                         "content": f"""Eres un experto en debugging de SQL para Firebird 3.0 y MicroSIP.
 
+🚨 **REGLA CRÍTICA PARA VENTAS EN MICROSIP**:
+- En consultas de ventas: Usa ÚNICAMENTE TIPO_DOCTO = 'V'. NUNCA agregues ESTATUS = 'A' o CANCELADO = 'N' - estos filtros NO aplican y causan errores.
+
 ⚠️ ERRORES COMUNES EN MICROSIP:
 - La tabla DOCTOS_PV usa FECHA (NO FECHA_DOCUMENTO)
 - La tabla DOCTOS_VE usa FECHA (NO FECHA_DOCUMENTO)
@@ -803,6 +820,12 @@ Aprovecha al máximo las capacidades de GPT-5 para crear queries óptimas y sofi
 - CAST solo cuando sea absolutamente necesario
 
 {schema_context}
+
+🚨 **REGLAS ESPECÍFICAS PARA MICROSIP EN REFINAMIENTO**:
+- Para consultas de ventas (DOCTOS_PV, DOCTOS_VE): NUNCA agregues ESTATUS = 'A' ni CANCELADO = 'N'. Usa ÚNICAMENTE TIPO_DOCTO = 'V'.
+- TIPO_DOCTO para ventas: SIEMPRE 'V' (Venta). NUNCA uses 'F', 'T' u otros tipos para ventas estándar.
+- Si el error es sobre columnas desconocidas (ej: IMPORTE), verifica el esquema y usa columnas correctas como PRECIO_TOTAL_NETO.
+- Mantén filtros simples: fechas, TIPO_DOCTO = 'V' y condiciones básicas (UNIDADES > 0).
 
 Corrige errores de sintaxis, nombres de columnas incorrectos y optimiza la consulta."""
                     },
@@ -1042,19 +1065,22 @@ class ResultAnalyzer:
 6. **Análisis Comparativo**: Compara con períodos anteriores o benchmarks
 
 INSTRUCCIONES CRÍTICAS:
-1. **SIEMPRE empieza con un resumen claro del resultado principal** (ej: "Encontré 18,941 artículos activos en el sistema")
+1. **SIEMPRE empieza con un resumen claro del resultado principal** (ej: "📊 Se vendieron **1,367 unidades** del artículo 'BOLITO LISTON NEGRO NUM5' en **106 tickets** durante septiembre 2025, generando **$20,368.29** en ingresos.")
 2. Responde en español, de forma clara pero profunda
-3. Genera insights que vayan más allá de lo obvio
-4. Menciona patrones, tendencias, anomalías y oportunidades
-5. Explica en términos de negocio y valor empresarial
-6. Si hay muchos registros, destaca los más importantes y el por qué
-7. Sugiere análisis complementarios que aporten valor adicional
-8. Usa emojis apropiados para destacar puntos clave (📊 📈 📉 💰 ⚠️ 💡)
+3. Genera insights que vayan más allá de lo obvio: identifica tendencias, patrones, oportunidades de mejora y posibles acciones estratégicas
+4. Explica el impacto en términos de negocio: cómo estos datos afectan ventas, rentabilidad, inventario, etc.
+5. Si hay muchos registros, destaca los más importantes y explica por qué
+6. Sugiere análisis complementarios específicos que aporten valor adicional
+7. Usa emojis apropiados para destacar puntos clave (📊 📈 📉 💰 ⚠️ 💡)
+8. **ESTRUCTURA OBLIGATORIA**:
+   - Primera línea: Resumen cuantitativo directo y accionable
+   - Luego: Análisis detallado con contexto empresarial
+   - Finalmente: Recomendaciones prácticas y sugerencias de próximos pasos
+9. **PROHIBIDO**: NO incluyas la consulta SQL, bloques de código, ni referencias técnicas en tu respuesta (ya se mostrarán por separado). Enfócate únicamente en el análisis de negocios y recomendaciones.
 
 FORMATO ESPERADO:
-- Primera línea: Resumen claro y directo del resultado (ej: "📊 Hay **18,941 artículos activos** en tu inventario")
-- Luego: Análisis detallado, contexto y recomendaciones
-- NO incluyas la consulta SQL en tu respuesta (ya se mostrará por separado)"""
+- Primera línea: Resumen claro y directo del resultado (ej: "📊 En septiembre 2025, 'BOLITO LISTON NEGRO NUM5' generó **$20,368.29** con **1,367 unidades vendidas** en **106 transacciones**.")
+- Luego: Análisis detallado, contexto y recomendaciones accionables."""
 
             messages = [
                 {"role": "system", "content": system_prompt},
@@ -1561,7 +1587,15 @@ class AIAssistant:
             analysis = self.result_analyzer.analyze_results(query_result, user_query)
             logger.info("✅ [SQL_QUERY] Análisis completado")
 
-            # Preparar respuesta
+            # Limpiar el análisis para eliminar posibles referencias al SQL
+            analysis = self._clean_analysis_from_sql(analysis)
+
+            # Si el análisis está vacío o muy corto, generar un resumen básico
+            if not analysis or len(analysis.strip()) < 50:
+                logger.warning("⚠️ [SQL_QUERY] Análisis generado vacío o muy corto, generando resumen básico...")
+                analysis = self._generate_basic_summary(query_result, user_query)
+
+            # Preparar respuesta: Primero el análisis, luego el SQL
             response_message = analysis
             logger.info("📝 [SQL_QUERY] Preparando respuesta final...")
 
@@ -1575,8 +1609,8 @@ class AIAssistant:
                 response_message += "Considera agregar filtros de fecha más específicos para mejorar el rendimiento."
             elif execution_time > 5:
                 response_message += f"\n\n⏱️ Tiempo de ejecución: {execution_time:.1f}s"
-            
-            # Agregar SQL generado al final del mensaje para que el usuario pueda verlo y probarlo
+
+            # Agregar SQL generado al final del mensaje para que el usuario pueda verlo y probarlo (UNA SOLA VEZ)
             response_message += f"\n\n---\n\n🔍 **Consulta SQL generada:**\n```sql\n{sql_query}\n```"
 
             if query_result.has_more_data:
@@ -1687,7 +1721,71 @@ Si el usuario pregunta sobre capacidades, explica que puedes ayudar con consulta
                 error=str(e)
             )
 
-    def _generate_follow_up_suggestions(self, original_query: str, query_result: QueryResult, 
+    def _clean_analysis_from_sql(self, analysis: str) -> str:
+        """Limpiar el análisis para eliminar referencias al SQL y asegurar unicidad."""
+        import re
+
+        # Remover bloques de código SQL si están presentes en el análisis
+        analysis = re.sub(r'```sql\s*[\s\S]*?\s*```', '', analysis)
+
+        # Remover líneas que mencionen "Consulta SQL" o similares
+        lines = analysis.split('\n')
+        cleaned_lines = []
+        for line in lines:
+            if not any(keyword in line.lower() for keyword in ['consulta sql', 'sql generado', 'sql query', 'select ', 'from ', 'where ']):
+                cleaned_lines.append(line)
+
+        return '\n'.join(cleaned_lines).strip()
+
+    def _generate_basic_summary(self, query_result: QueryResult, user_query: str) -> str:
+        """Generar un resumen básico en lenguaje natural si el análisis de IA falla."""
+        try:
+            # Obtener información básica de los resultados
+            row_count = query_result.row_count
+            columns = query_result.columns
+            sample_data = query_result.preview_data[:5] if query_result.preview_data else []
+
+            # Crear un resumen simple basado en la consulta y datos
+            if row_count == 0:
+                return "📊 No se encontraron resultados para esta consulta. Puedes intentar ampliar el rango de fechas o verificar los filtros aplicados."
+
+            # Identificar columnas clave (ej: totales, nombres, etc.)
+            summary_lines = [f"📊 Se encontraron **{row_count:,}** resultados para '{user_query}'."]
+
+            if len(columns) >= 2 and sample_data:
+                # Asumir que las primeras columnas son identificadores y las últimas son métricas
+                for i, row in enumerate(sample_data[:3]):  # Mostrar hasta 3 ejemplos
+                    key_values = []
+                    for j, col in enumerate(columns[:2]):  # Primeras 2 columnas como clave
+                        if j < len(row):
+                            key_values.append(f"{col}: {row[j]}")
+                    if len(columns) > 2 and len(row) > 2:
+                        # Agregar métricas de las últimas columnas
+                        metric_values = []
+                        for j in [-2, -1]:  # Últimas 2 columnas como métricas
+                            if abs(j) <= len(columns) and abs(j) <= len(row):
+                                col_name = columns[j]
+                                value = row[j]
+                                if isinstance(value, (int, float)):
+                                    metric_values.append(f"{col_name}: {value:,}")
+                        if metric_values:
+                            key_values.append(f" | {', '.join(metric_values)}")
+                    summary_lines.append(f"  - {' | '.join(key_values)}")
+
+            # Agregar recomendaciones generales
+            summary_lines.append("💡 **Recomendaciones**:")
+            summary_lines.append("  - Revisa los detalles en la tabla de resultados.")
+            summary_lines.append("  - Puedes exportar estos datos a Excel para análisis adicional.")
+            if 'ventas' in user_query.lower():
+                summary_lines.append("  - Considera analizar tendencias por período o comparar con otros productos.")
+
+            return "\n".join(summary_lines)
+
+        except Exception as e:
+            logger.error(f"Error generando resumen básico: {e}")
+            return "📊 Se obtuvieron resultados, pero no se pudo generar un análisis detallado. Consulta los datos en la tabla proporcionada."
+
+    def _generate_follow_up_suggestions(self, original_query: str, query_result: QueryResult,
                                       relevant_tables: List[Dict[str, Any]]) -> List[str]:
         """Generar sugerencias de seguimiento inteligentes."""
         suggestions = []

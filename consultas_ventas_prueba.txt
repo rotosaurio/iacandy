@@ -1,0 +1,83 @@
+# Consultas de Ventas para Pruebas
+
+Estas consultas están diseñadas específicamente para funcionar con las tablas de ventas del sistema MicroSIP.
+
+## Consultas Básicas que Deberían Funcionar
+
+1. "¿Cuántos artículos hay activos?"
+   - Esto debería encontrar la tabla ARTICULOS y generar: SELECT COUNT(*) FROM ARTICULOS WHERE ESTATUS = 'A'
+
+2. "¿Cuál fue la última venta?"
+   - Esto debería encontrar DOCTOS_PV y generar una consulta para obtener la fecha más reciente
+
+3. "¿De qué almacén fue la última venta?"
+   - Esto debería hacer JOIN entre DOCTOS_PV y ALMACENES
+
+4. "¿Cuántas ventas hubo hoy?"
+   - Esto debería contar documentos de venta del día actual
+
+## Consultas Específicas de Ventas
+
+5. "documentos de punto de venta"
+   - Usa el término técnico para ventas de mostrador
+
+6. "ventas empresariales"
+   - Para documentos DOCTOS_VE
+
+7. "productos vendidos"
+   - Para consultar detalles de ventas por producto
+
+8. "almacenes con más ventas"
+   - Para análisis por ubicación
+
+## Consultas SQL Directas (si el sistema lo permite)
+
+Si el asistente IA no funciona, puedes usar estas consultas SQL directamente:
+
+```sql
+-- Artículos activos
+SELECT COUNT(*) AS ARTICULOS_ACTIVOS FROM ARTICULOS WHERE ESTATUS = 'A';
+
+-- Última venta
+SELECT FECHA, HORA, ALMACEN_ID, IMPORTE_NETO
+FROM DOCTOS_PV
+WHERE CANCELADO = 'N'
+ORDER BY FECHA DESC, HORA DESC
+FIRST 1;
+
+-- Última venta con almacén
+SELECT pv.FECHA, pv.HORA, a.NOMBRE as ALMACEN, pv.IMPORTE_NETO
+FROM DOCTOS_PV pv
+JOIN ALMACENES a ON pv.ALMACEN_ID = a.ALMACEN_ID
+WHERE pv.CANCELADO = 'N'
+ORDER BY pv.FECHA DESC, pv.HORA DESC
+FIRST 1;
+
+-- Ventas del día
+SELECT COUNT(*) as VENTAS_HOY, SUM(IMPORTE_NETO) as TOTAL_HOY
+FROM DOCTOS_PV
+WHERE FECHA = CURRENT_DATE AND CANCELADO = 'N';
+```
+
+## Solución Implementada
+
+Se realizó el siguiente ajuste para mejorar la detección de consultas de ventas:
+
+1. **Threshold de similitud reducido**: De 0.50 a 0.30 para ser más permisivo con consultas generales
+2. **Tablas prioritarias**: Las tablas DOCTOS_PV, DOCTOS_VE, DOCTOS_PV_DET y DOCTOS_VE_DET se colocaron al inicio de la categoría VENTAS
+3. **Documentación completa**: Se creó EJEMPLOS_CONSULTAS_VENTAS.md con ejemplos detallados
+
+## Próximos Pasos
+
+Si las consultas naturales siguen sin funcionar:
+
+1. Usa términos más técnicos como "DOCTOS_PV" o "documentos de venta"
+2. Prueba consultas más específicas como "ventas del último mes"
+3. Considera usar las consultas SQL directas si el sistema lo permite
+
+## Estado Actual
+
+✅ Ajuste de threshold implementado
+✅ Documentación de ejemplos creada
+✅ Tablas de ventas priorizadas en diccionario
+⏳ Pendiente: Verificar funcionamiento con consultas reales

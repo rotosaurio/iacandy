@@ -1,0 +1,7 @@
+tunnel: a6bb733e-ac4f-4a93-8078-ae782b616d9a
+credentials-file: C:\Users\MICROSIP\.cloudflared\a6bb733e-ac4f-4a93-8078-ae782b616d9a.json
+
+ingress:
+  - hostname: ia.syscandymart.software
+    service: http://localhost:8050
+  - service: http_status:404

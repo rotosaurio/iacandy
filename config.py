@@ -88,7 +88,7 @@ class RAGConfig:
 
     # Parámetros de búsqueda y filtrado (MEJORADOS)
     top_k_tables: int = 15  # Buscar más candidatos para mejor filtrado
-    similarity_threshold: float = 0.50  # AUMENTADO: Threshold más estricto para mayor precisión (antes 0.25)
+    similarity_threshold: float = 0.30  # AJUSTADO: Más permisivo para consultas generales como "ventas" (antes 0.50)
     max_tables_for_sql: int = 8  # Máximo de tablas a enviar a GPT después de filtrado
 
     # Pesos para scoring de relevancia
