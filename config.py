@@ -84,7 +84,7 @@ class EdgeCaseConfig:
 class RAGConfig:
     """Configuración del sistema RAG (Retrieval-Augmented Generation)."""
     embeddings_model: str = "text-embedding-3-small"  # Cambiado a OpenAI embeddings (hardcodeado)
-    vector_db_path: str = "./data/chroma_db_openai"  # Nueva ruta para evitar conflictos con ONNX
+    vector_db_path: str = "./data/chroma_db_openai"
 
     # Parámetros de búsqueda y filtrado (MEJORADOS)
     top_k_tables: int = 15  # Buscar más candidatos para mejor filtrado

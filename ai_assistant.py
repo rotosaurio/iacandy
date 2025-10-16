@@ -450,7 +450,110 @@ SELECT NOMBRE FROM ARTICULOS WHERE ARTICULO_ID = 500
 
 🚫 **EXCLUSIONES AUTOMÁTICAS DE ARTÍCULOS/REGISTROS**:
 
-Al consultar ventas, productos más vendidos, o análisis de artículos:
+⚠️ **MUY IMPORTANTE - ESTRATEGIA DE FILTRADO PARA "ÚLTIMA VENTA":**
+
+Cuando el usuario pide la "ÚLTIMA venta", "venta más reciente", o similar:
+- ❌ **MAL**: Buscar el DOCTO_PV_ID más alto y luego filtrar artículos
+  - Problema: Si la última venta solo tiene "VENTA GLOBAL", no habrá resultados
+- ✅ **BIEN**: Buscar la última venta QUE TENGA artículos reales
+
+**PATRÓN CORRECTO para "última venta con artículos" (QUERY SIMPLE Y RÁPIDA):**
+
+⚠️ **FILTROS DE FECHA - REGLA CRÍTICA:**
+- Si el usuario especifica fechas (ej: "febrero 2025", "último mes", "esta semana"):
+  → Usa SOLO las fechas que el usuario pidió
+- Si el usuario NO especifica fechas (solo dice "última venta"):
+  → ESTRATEGIA INTELIGENTE para bases de datos potencialmente desactualizadas:
+
+  **Opción A (PREFERIDA)**: Usar subconsulta para encontrar la fecha más reciente
+  ```sql
+  WHERE pv.FECHA >= (SELECT FIRST 1 MAX(FECHA) - 90 FROM DOCTOS_PV)
+  ```
+
+  **Opción B**: Si no sabes si la BD está actualizada, usa rango amplio
+  ```sql
+  WHERE pv.FECHA >= CURRENT_DATE - 365  -- Último año (más seguro)
+  ```
+
+  **Opción C**: Si estás seguro que la BD está al día
+  ```sql
+  WHERE pv.FECHA >= CURRENT_DATE - 90  -- Últimos 3 meses (más rápido)
+  ```
+
+  → La Opción A es MEJOR porque se adapta automáticamente a BDs desactualizadas
+
+**Ejemplo 1: Usuario NO especifica fecha ("última venta registrada") - ÓPTIMO**
+```sql
+-- ✅ CORRECTO: Usa subconsulta para adaptarse a BDs desactualizadas
+SELECT FIRST 1
+    pv.DOCTO_PV_ID,
+    pv.FECHA,
+    al.NOMBRE AS ALMACEN,
+    a.NOMBRE AS ARTICULO,
+    pvd.UNIDADES,
+    pvd.PRECIO_TOTAL_NETO
+FROM DOCTOS_PV pv
+INNER JOIN DOCTOS_PV_DET pvd ON pvd.DOCTO_PV_ID = pv.DOCTO_PV_ID
+LEFT JOIN ARTICULOS a ON a.ARTICULO_ID = pvd.ARTICULO_ID
+LEFT JOIN ALMACENES al ON al.ALMACEN_ID = pv.ALMACEN_ID
+WHERE pv.FECHA >= (SELECT MAX(FECHA) - 90 FROM DOCTOS_PV)  -- ⚡ Se adapta a BDs antiguas
+  AND pvd.UNIDADES > 0
+  AND pvd.PRECIO_TOTAL_NETO > 0
+  AND (a.NOMBRE IS NULL OR (
+      a.NOMBRE NOT LIKE '%VENTA GLOBAL%'
+      AND a.NOMBRE NOT LIKE '%CORTE%'
+      AND a.NOMBRE NOT LIKE '%SISTEMA%'
+  ))
+ORDER BY pv.FECHA DESC, pv.DOCTO_PV_ID DESC
+```
+**Nota**: Esto funciona aunque la BD tenga datos de hace 1 año, porque busca "90 días antes de la fecha MÁS RECIENTE en la tabla", no 90 días antes de HOY.
+
+**Ejemplo 2: Usuario SÍ especifica fecha ("última venta de febrero 2025")**
+```sql
+-- ✅ CORRECTO: Usar las fechas del usuario
+SELECT FIRST 1
+    pv.DOCTO_PV_ID,
+    pv.FECHA,
+    al.NOMBRE AS ALMACEN,
+    a.NOMBRE AS ARTICULO,
+    pvd.UNIDADES,
+    pvd.PRECIO_TOTAL_NETO
+FROM DOCTOS_PV pv
+INNER JOIN DOCTOS_PV_DET pvd ON pvd.DOCTO_PV_ID = pv.DOCTO_PV_ID
+LEFT JOIN ARTICULOS a ON a.ARTICULO_ID = pvd.ARTICULO_ID
+LEFT JOIN ALMACENES al ON al.ALMACEN_ID = pv.ALMACEN_ID
+WHERE pv.FECHA >= DATE '2025-02-01'      -- Fechas del usuario
+  AND pv.FECHA < DATE '2025-03-01'       -- Fechas del usuario
+  AND pvd.UNIDADES > 0
+  AND pvd.PRECIO_TOTAL_NETO > 0
+  AND (a.NOMBRE IS NULL OR (
+      a.NOMBRE NOT LIKE '%VENTA GLOBAL%'
+      AND a.NOMBRE NOT LIKE '%CORTE%'
+      AND a.NOMBRE NOT LIKE '%SISTEMA%'
+  ))
+ORDER BY pv.FECHA DESC, pv.DOCTO_PV_ID DESC
+```
+
+❌ **INCORRECTO - QUERY LENTA (NO USES ESTE PATRÓN):**
+```sql
+-- ❌ MAL: Subconsulta con EXISTS escanea MILLONES de registros
+-- Esta query puede tardar 10+ minutos
+SELECT pv.* FROM DOCTOS_PV pv
+WHERE EXISTS (
+    SELECT 1 FROM DOCTOS_PV_DET pvd
+    WHERE pvd.DOCTO_PV_ID = pv.DOCTO_PV_ID
+      AND pvd.UNIDADES > 0
+)
+ORDER BY pv.FECHA DESC
+```
+
+**Nota:**
+- ⚡ **SIEMPRE incluye filtro de fecha** en tablas grandes (DOCTOS_PV tiene 3.9 millones de registros)
+- ✅ El ORDER BY va al FINAL después de filtrar
+- ✅ FIRST 1 toma solo el primer resultado después de ordenar
+- ❌ NUNCA uses EXISTS o subconsultas correlacionadas para "última venta"
+
+**Para análisis de ventas y productos más vendidos:**
 
 1. **EXCLUIR artículos de sistema/control**:
    - WHERE pvd.DESCRIPCION1 NOT LIKE '%VENTA GLOBAL%'
@@ -792,6 +895,68 @@ Por favor, corrige el SQL y explica los cambios realizados.
         logger.error(f"❌ No se pudo refinar el SQL después de intentar con todos los modelos disponibles. Último error: {last_error}")
         return original_sql, f"No se pudo refinar el SQL después de intentar con múltiples modelos. Último error: {last_error}"
 
+    def refine_sql_for_zero_results(self, original_sql: str, user_query: str, retry_attempt: int) -> Tuple[str, str]:
+        """
+        Refinar SQL cuando devuelve 0 resultados ampliando progresivamente los filtros.
+
+        Args:
+            original_sql: SQL que devolvió 0 resultados
+            user_query: Consulta original del usuario
+            retry_attempt: Número de intento (1, 2, 3...)
+
+        Returns:
+            (sql_refinado, mensaje_para_usuario)
+        """
+        logger.info(f"🔄 [ZERO_RESULTS] Refinando SQL para intento {retry_attempt} de ampliación de búsqueda")
+
+        # Estrategias de ampliación según el intento
+        if retry_attempt == 1:
+            # Intento 1: Duplicar rango de fecha (90 → 180 días)
+            expanded_sql = original_sql.replace('CURRENT_DATE - 90', 'CURRENT_DATE - 180')
+            expanded_sql = expanded_sql.replace('- 90 FROM DOCTOS_PV', '- 180 FROM DOCTOS_PV')
+            expanded_sql = expanded_sql.replace('DATE - 90', 'DATE - 180')
+            message = "Amplié la búsqueda a los últimos 6 meses"
+
+        elif retry_attempt == 2:
+            # Intento 2: Ampliar a 1 año
+            expanded_sql = original_sql.replace('CURRENT_DATE - 90', 'CURRENT_DATE - 365')
+            expanded_sql = expanded_sql.replace('CURRENT_DATE - 180', 'CURRENT_DATE - 365')
+            expanded_sql = expanded_sql.replace('- 90 FROM DOCTOS_PV', '- 365 FROM DOCTOS_PV')
+            expanded_sql = expanded_sql.replace('- 180 FROM DOCTOS_PV', '- 365 FROM DOCTOS_PV')
+            expanded_sql = expanded_sql.replace('DATE - 90', 'DATE - 365')
+            expanded_sql = expanded_sql.replace('DATE - 180', 'DATE - 365')
+            message = "Amplié la búsqueda al último año completo"
+
+        elif retry_attempt == 3:
+            # Intento 3: Quitar filtro de fecha (solo si es consulta de "última venta")
+            if 'FIRST 1' in original_sql.upper() and any(keyword in user_query.lower() for keyword in ['última', 'ultimo', 'reciente', 'latest', 'last']):
+                # Quitar líneas WHERE que contengan FECHA
+                import re
+                lines = original_sql.split('\n')
+                filtered_lines = []
+                for line in lines:
+                    # Quitar líneas WHERE que contengan filtros de fecha
+                    if 'WHERE' in line.upper() and ('FECHA >=' in line.upper() or 'FECHA >= CURRENT_DATE' in line.upper() or 'MAX(FECHA)' in line.upper()):
+                        continue
+                    filtered_lines.append(line)
+                expanded_sql = '\n'.join(filtered_lines)
+                message = "Amplié la búsqueda a TODOS los registros históricos (sin filtro de fecha)"
+            else:
+                # Para otras consultas, mantener filtro de 1 año
+                expanded_sql = original_sql
+                message = "No se encontraron datos incluso en el último año"
+
+        else:
+            # No más intentos
+            logger.warning(f"⚠️ [ZERO_RESULTS] Máximo de intentos alcanzado ({retry_attempt})")
+            return original_sql, "No se encontraron resultados después de múltiples intentos de ampliación"
+
+        logger.info(f"✅ [ZERO_RESULTS] SQL ampliado exitosamente. Cambio: {message}")
+        logger.debug(f"📋 [ZERO_RESULTS] SQL original: {original_sql[:200]}...")
+        logger.debug(f"📋 [ZERO_RESULTS] SQL ampliado: {expanded_sql[:200]}...")
+
+        return expanded_sql, message
+
 
 class ResultAnalyzer:
     """Analizador de resultados de consultas SQL."""
@@ -811,7 +976,7 @@ class ResultAnalyzer:
                 return f"La consulta tuvo un error: {query_result.error}"
             
             if query_result.row_count == 0:
-                return "No se encontraron resultados para esta consulta."
+                return "No se encontraron resultados para esta consulta, incluso después de intentar ampliar los filtros de búsqueda."
             
             # Preparar resumen de datos
             data_summary = self._prepare_data_summary(query_result)
@@ -1344,6 +1509,48 @@ class AIAssistant:
             logger.info("✅ [SQL_QUERY] Consulta ejecutada exitosamente, iniciando análisis de resultados...")
             logger.info(f"📊 [SQL_QUERY] Datos obtenidos: {query_result.row_count} filas")
 
+            # 🔄 Si no hay resultados, intentar refinamiento hasta 3 veces
+            max_date_expansion_retries = 3
+            date_expansion_retry = 0
+            original_user_query = user_query  # Guardar consulta original para refinamiento
+
+            while not query_result.error and query_result.row_count == 0 and date_expansion_retry < max_date_expansion_retries:
+                date_expansion_retry += 1
+                logger.info(f"🔄 [ZERO_RESULTS] Intento {date_expansion_retry}/{max_date_expansion_retries} de ampliación de búsqueda...")
+
+                try:
+                    # Llamar al método de refinamiento para cero resultados
+                    expanded_sql, expansion_msg = self.sql_generator.refine_sql_for_zero_results(
+                        sql_query,
+                        original_user_query,
+                        date_expansion_retry
+                    )
+
+                    if expanded_sql != sql_query:
+                        logger.info(f"📋 [ZERO_RESULTS] SQL ampliado: {expanded_sql}")
+                        logger.info("🗃️ [ZERO_RESULTS] Ejecutando SQL ampliado...")
+
+                        # Ejecutar con rango ampliado
+                        expanded_query_result = db.execute_query_limited(expanded_sql)
+
+                        if expanded_query_result.row_count > 0:
+                            # ✅ Éxito! Usar resultados ampliados
+                            query_result = expanded_query_result
+                            sql_query = expanded_sql
+                            logger.info(f"✅ [ZERO_RESULTS] Encontrados {query_result.row_count} resultados ampliando búsqueda (intento {date_expansion_retry})")
+                            # Agregar nota al usuario sobre la ampliación realizada
+                            expansion_note = f"\n\n💡 **Nota**: {expansion_msg}"
+                            break
+                        else:
+                            logger.warning(f"⚠️ [ZERO_RESULTS] Intento {date_expansion_retry} no encontró resultados")
+                    else:
+                        logger.info(f"ℹ️ [ZERO_RESULTS] No se pudo ampliar más la búsqueda en intento {date_expansion_retry}")
+                        break
+
+                except Exception as e:
+                    logger.error(f"❌ [ZERO_RESULTS] Error en intento {date_expansion_retry} de ampliación: {e}")
+                    break
+
             # Analizar resultados
             logger.info("🧠 [SQL_QUERY] Analizando resultados con IA...")
             analysis = self.result_analyzer.analyze_results(query_result, user_query)
@@ -1352,6 +1559,10 @@ class AIAssistant:
             # Preparar respuesta
             response_message = analysis
             logger.info("📝 [SQL_QUERY] Preparando respuesta final...")
+
+            # Agregar nota de expansión si se realizó
+            if 'expansion_note' in locals():
+                response_message += expansion_note
 
             # Advertencia si la query tardó mucho
             if execution_time > 10:

@@ -103,10 +103,10 @@ class ConnectionPool:
         # Importar aquí para evitar errores en tiempo de importación del módulo
         from firebird.driver import connect as fb_connect, tpb, Isolation, TraAccessMode
 
-        # Configurar TPB (Transaction Parameter Block) para READ COMMITTED
-        # Esto es MUCHO más rápido que SNAPSHOT (default) para queries complejas
+        # Configurar TPB (Transaction Parameter Block) para SNAPSHOT
+        # SNAPSHOT es más rápido que READ COMMITTED para queries SELECT puras
         custom_tpb = tpb(
-            isolation=Isolation.READ_COMMITTED_RECORD_VERSION,  # READ COMMITTED - más rápido
+            isolation=Isolation.SNAPSHOT,  # SNAPSHOT - más rápido para lecturas puras
             access_mode=TraAccessMode.READ,  # Solo lectura (queries SELECT)
             lock_timeout=30  # Timeout de 30 segundos para locks
         )
@@ -728,12 +728,15 @@ class FirebirdDB:
         """Ejecutar query con límite de filas para preview."""
         if limit is None:
             limit = config.ui.preview_row_limit
-        
+
+        # Optimizar consulta agregando límite directamente al SQL
+        optimized_sql = self._optimize_query_with_limit(sql, limit)
+
         # Validar seguridad del SQL
-        is_safe, error_msg = SQLValidator.is_safe_query(sql)
+        is_safe, error_msg = SQLValidator.is_safe_query(optimized_sql)
         if not is_safe:
             return QueryResult(
-                sql=sql,
+                sql=optimized_sql,
                 columns=[],
                 row_count=0,
                 execution_time=0,
@@ -746,9 +749,9 @@ class FirebirdDB:
             with Timer("Query execution") as timer:
                 with self.get_connection() as conn:
                     cursor = conn.cursor()
-                    
+
                     # Ejecutar query
-                    cursor.execute(sql)
+                    cursor.execute(optimized_sql)
                     
                     # Obtener metadatos
                     columns = [desc[0] for desc in cursor.description]
@@ -769,10 +772,10 @@ class FirebirdDB:
             has_more = row_count > limit
             actual_rows = min(row_count, limit)
             
-            logger.sql_query(sql, execution_time=timer.elapsed_time)
+            logger.sql_query(optimized_sql, execution_time=timer.elapsed_time)
             
             return QueryResult(
-                sql=sql,
+                sql=optimized_sql,
                 columns=columns,
                 row_count=actual_rows,
                 execution_time=timer.elapsed_time,
@@ -781,9 +784,9 @@ class FirebirdDB:
             )
             
         except Exception as e:
-            logger.error(f"Error ejecutando query: {sql}", e)
+            logger.error(f"Error ejecutando query: {optimized_sql}", e)
             return QueryResult(
-                sql=sql,
+                sql=optimized_sql,
                 columns=[],
                 row_count=0,
                 execution_time=0,
@@ -792,15 +795,53 @@ class FirebirdDB:
                 error=str(e)
             )
     
+    def _optimize_query_with_limit(self, sql: str, limit: int) -> str:
+        """Optimizar consulta agregando límite directamente al SQL usando SELECT FIRST."""
+        import re
+
+        sql_stripped = sql.strip()
+        sql_upper = sql_stripped.upper()
+
+        # Si ya tiene SELECT FIRST, reemplazar el número
+        if sql_upper.startswith('SELECT FIRST'):
+            # Buscar el número después de FIRST
+            pattern = r'SELECT FIRST\s+(\d+)'
+            match = re.search(pattern, sql_upper)
+
+            if match:
+                # Reemplazar el número existente
+                old_first = match.group(0)
+                new_first = f'SELECT FIRST {limit + 1}'  # +1 para detectar si hay más datos
+                return sql_stripped.replace(old_first, new_first)
+            else:
+                # Si no encuentra número válido, reconstruir usando regex para encontrar SELECT
+                select_match = re.search(r'SELECT\s+', sql_upper)
+                if select_match:
+                    select_end = select_match.end()
+                    return f'SELECT FIRST {limit + 1}{sql_stripped[select_end:]}'
+                else:
+                    # Fallback: reconstruir manualmente
+                    return f'SELECT FIRST {limit + 1} {sql_stripped[7:].lstrip()}'
+        else:
+            # Agregar SELECT FIRST al principio usando regex para encontrar SELECT
+            select_match = re.search(r'SELECT\s+', sql_upper)
+            if select_match:
+                select_end = select_match.end()
+                return f'SELECT FIRST {limit + 1}{sql_stripped[select_end:]}'
+            else:
+                # Fallback: reconstruir manualmente
+                return f'SELECT FIRST {limit + 1} {sql_stripped[7:].lstrip()}'
+
     def execute_query_streaming(self, sql: str) -> Iterator[List[Any]]:
         """Ejecutar query con streaming para grandes volúmenes."""
         is_safe, error_msg = SQLValidator.is_safe_query(sql)
         if not is_safe:
             raise ValueError(f"Query no válido: {error_msg}")
-        
+
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
+
                 cursor.execute(sql)
                 
                 batch_size = config.export.batch_size
