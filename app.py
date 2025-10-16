@@ -298,10 +298,16 @@ def chat():
         # Agregar datos si hay resultados
         if response.has_data and response.data:
             df = pd.DataFrame(response.data)
-            
+
+            # Convertir tipos no serializables a string
+            for col in df.columns:
+                # Convertir datetime.time, datetime.date, datetime.datetime a strings
+                if df[col].dtype == 'object':
+                    df[col] = df[col].apply(lambda x: str(x) if hasattr(x, '__str__') and not isinstance(x, str) else x)
+
             # Limitar preview a 100 filas
             preview_df = df.head(100)
-            
+
             result['data'] = {
                 'columns': df.columns.tolist(),
                 'rows': preview_df.values.tolist(),
@@ -309,7 +315,7 @@ def chat():
                 'preview_rows': len(preview_df),
                 'truncated': len(df) > 100
             }
-            
+
             # Guardar DataFrame completo en sesión para exportación
             if session_id not in app_state['sessions']:
                 app_state['sessions'][session_id] = {}

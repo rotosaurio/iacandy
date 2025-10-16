@@ -10,7 +10,7 @@ firebird-driver==2.0.2
 # AI and ML
 openai==2.3.0
 chromadb==0.4.22
-sentence-transformers==5.1.1
+# sentence-transformers ya NO se usa - reemplazado por OpenAI embeddings
 
 # Data processing
 pandas==2.0.3

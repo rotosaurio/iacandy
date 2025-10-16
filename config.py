@@ -26,7 +26,7 @@ class DatabaseConfig:
 @dataclass
 class AIConfig:
     """Configuración de OpenAI y parámetros de IA."""
-    api_key: str = "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"
+    api_key: str = ""
     
     # Modelo principal - GPT-5 para máximo rendimiento (2025)
     model: str = "gpt-5"
@@ -83,13 +83,23 @@ class EdgeCaseConfig:
 @dataclass
 class RAGConfig:
     """Configuración del sistema RAG (Retrieval-Augmented Generation)."""
-    embeddings_model: str = "all-MiniLM-L6-v2"
-    vector_db_path: str = "./data/chroma_db"
-    top_k_tables: int = 8  # Aumentado para consultas complejas
-    similarity_threshold: float = 0.25  # Threshold más bajo para capturar tablas relevantes (distancia coseno)
+    embeddings_model: str = "text-embedding-3-small"  # Cambiado a OpenAI embeddings (hardcodeado)
+    vector_db_path: str = "./data/chroma_db_openai"  # Nueva ruta para evitar conflictos con ONNX
+
+    # Parámetros de búsqueda y filtrado (MEJORADOS)
+    top_k_tables: int = 15  # Buscar más candidatos para mejor filtrado
+    similarity_threshold: float = 0.50  # AUMENTADO: Threshold más estricto para mayor precisión (antes 0.25)
+    max_tables_for_sql: int = 8  # Máximo de tablas a enviar a GPT después de filtrado
+
+    # Pesos para scoring de relevancia
+    use_relevance_scoring: bool = True  # Activar scoring avanzado
+    weight_similarity: float = 0.6  # Peso de similitud semántica
+    weight_table_importance: float = 0.2  # Peso de importancia de tabla (row_count, FK, etc)
+    weight_keyword_match: float = 0.2  # Peso de keywords exactos en descripción
+
     chunk_size: int = 512
     cache_ttl_minutes: int = 30
-    
+
     # Soporte para procedimientos almacenados
     enable_stored_procedures: bool = True
     procedures_cache_path: str = "./data/procedures_cache.json"

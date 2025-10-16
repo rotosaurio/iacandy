@@ -14,9 +14,9 @@ from datetime import datetime, timedelta
 
 import chromadb
 from chromadb.config import Settings
-from sentence_transformers import SentenceTransformer
 import numpy as np
 import pandas as pd
+from openai import OpenAI
 
 from config import config, StatusMessages
 from database import db, TableInfo
@@ -46,42 +46,71 @@ COLUMN_SEMANTICS = {
 
 
 class EmbeddingGenerator:
-    """Generador de embeddings usando SentenceTransformers."""
-    
+    """Generador de embeddings usando OpenAI API directamente (hardcodeado)."""
+
     def __init__(self):
-        self.model = None
+        self.openai_client = None
         self._model_lock = threading.Lock()
-    
+
     def _load_model(self):
-        """Cargar modelo de embeddings lazy loading."""
-        if self.model is None:
+        """Cargar cliente de OpenAI lazy loading."""
+        if self.openai_client is None:
             with self._model_lock:
-                if self.model is None:
-                    logger.info(f"Cargando modelo de embeddings: {config.rag.embeddings_model}")
-                    self.model = SentenceTransformer(config.rag.embeddings_model)
-                    logger.info("Modelo de embeddings cargado")
-    
+                if self.openai_client is None:
+                    logger.info("Inicializando cliente OpenAI para embeddings (text-embedding-3-small)")
+                    # HARDCODED: Usar API key de config
+                    self.openai_client = OpenAI(api_key=config.ai.api_key)
+                    logger.info("Cliente OpenAI inicializado correctamente")
+
     def generate_embedding(self, text: str) -> List[float]:
-        """Generar embedding para un texto."""
+        """Generar embedding para un texto usando OpenAI API."""
         self._load_model()
-        
+
         if not text or not text.strip():
-            return [0.0] * 384  # Dimensiones del modelo all-MiniLM-L6-v2
-        
-        embedding = self.model.encode(text.strip())
-        return embedding.tolist()
-    
+            return [0.0] * 1536  # Dimensiones de text-embedding-3-small
+
+        try:
+            # Llamada directa a OpenAI API v1.0+
+            response = self.openai_client.embeddings.create(
+                model="text-embedding-3-small",
+                input=text.strip()
+            )
+            return response.data[0].embedding
+        except Exception as e:
+            logger.error(f"Error generando embedding: {e}")
+            return [0.0] * 1536
+
     def generate_batch_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Generar embeddings para múltiples textos."""
+        """Generar embeddings para múltiples textos usando OpenAI API (hasta 100 textos por batch)."""
         self._load_model()
-        
+
         if not texts:
             return []
-        
+
         # Filtrar textos vacíos
-        clean_texts = [text.strip() if text else "" for text in texts]
-        embeddings = self.model.encode(clean_texts)
-        return [emb.tolist() for emb in embeddings]
+        clean_texts = [text.strip() if text else " " for text in texts]
+
+        try:
+            # OpenAI permite hasta 100 embeddings por request
+            all_embeddings = []
+            batch_size = 100
+
+            for i in range(0, len(clean_texts), batch_size):
+                batch = clean_texts[i:i + batch_size]
+
+                response = self.openai_client.embeddings.create(
+                    model="text-embedding-3-small",
+                    input=batch
+                )
+
+                batch_embeddings = [item.embedding for item in response.data]
+                all_embeddings.extend(batch_embeddings)
+
+            return all_embeddings
+
+        except Exception as e:
+            logger.error(f"Error generando batch de embeddings: {e}")
+            return [[0.0] * 1536 for _ in clean_texts]
 
 
 class TableDescriptor:
@@ -975,51 +1004,120 @@ class SchemaManager:
     
     def _adjust_scores_by_context(self, tables: List[Dict[str, Any]], query: str) -> List[Dict[str, Any]]:
         """
-        Ajustar scores de tablas basado en contexto adicional.
-        
+        Ajustar scores de tablas basado en sistema multi-factor avanzado.
+
+        Combina:
+        1. Similitud semántica (embedding similarity)
+        2. Importancia de tabla (row_count, FKs, indices)
+        3. Keyword matching (coincidencias exactas en nombre/columnas)
+
         Args:
             tables: Lista de tablas con scores
             query: Consulta original del usuario
-            
+
         Returns:
-            Lista de tablas con scores ajustados
+            Lista de tablas con scores ajustados y reordenadas
         """
+        if not config.rag.use_relevance_scoring:
+            # Si scoring avanzado deshabilitado, retornar tal cual
+            return tables
+
         query_lower = query.lower()
-        
+        query_words = [w for w in query_lower.split() if len(w) > 3]  # Palabras significativas
+
         for table in tables:
-            original_score = table['similarity_score']
-            adjustments = 0
-            
-            # Penalizar tablas vacías
-            if table.get('row_count', 0) == 0:
-                adjustments -= 0.2
-            
-            # Bonificar tablas con muchos registros (posiblemente activas)
-            elif table.get('row_count', 0) > 1000:
-                adjustments += 0.1
-            
-            # Bonificar si tiene FKs (mejor conectividad)
-            if table.get('foreign_keys') and len(table['foreign_keys']) > 0:
-                adjustments += 0.05
-            
-            # Bonificar si nombres de columnas coinciden con la query
-            if table.get('columns'):
-                for col in table['columns']:
-                    col_name = col.get('name', '').lower()
-                    # Buscar palabras de la query en nombres de columnas
-                    query_words = query_lower.split()
-                    for word in query_words:
-                        if len(word) > 3 and word in col_name:
-                            adjustments += 0.03
-                            break
-            
-            # Aplicar ajustes
-            table['similarity_score'] = max(0, min(1, original_score + adjustments))
-            table['score_adjustments'] = adjustments
-        
-        # Reordenar por score ajustado
+            # === FACTOR 1: SIMILITUD SEMÁNTICA (ya viene de ChromaDB) ===
+            semantic_score = table.get('similarity_score', 0.0)
+
+            # === FACTOR 2: IMPORTANCIA DE TABLA ===
+            importance_score = 0.0
+
+            # 2.1 Volumen de datos (normalizado 0-1)
+            row_count = table.get('row_count', 0)
+            if row_count > 0:
+                # Normalizar logarítmicamente (10 registros = 0.1, 1000 = 0.5, 100k = 0.9, 1M+ = 1.0)
+                import math
+                importance_score += min(math.log10(row_count + 1) / 6, 1.0) * 0.4
+            elif row_count == 0:
+                # Penalizar tablas vacías
+                importance_score -= 0.3
+
+            # 2.2 Conectividad (foreign keys)
+            fk_count = len(table.get('foreign_keys', []))
+            if fk_count > 0:
+                # Normalizar: 1 FK = 0.2, 3 FKs = 0.6, 5+ FKs = 1.0
+                importance_score += min(fk_count / 5.0, 1.0) * 0.3
+
+            # 2.3 Complejidad estructural (número de columnas)
+            col_count = len(table.get('columns', []))
+            if col_count > 5:
+                # Normalizar: 5 cols = 0.1, 15 cols = 0.5, 30+ cols = 1.0
+                importance_score += min((col_count - 5) / 25.0, 1.0) * 0.2
+
+            # 2.4 Si es tabla principal (no relacionada), bonificar
+            if not table.get('is_related', False):
+                importance_score += 0.1
+
+            # === FACTOR 3: KEYWORD MATCHING ===
+            keyword_score = 0.0
+            table_name = table.get('name', '').lower()
+            table_desc = table.get('description', '').lower()
+
+            # 3.1 Coincidencias en nombre de tabla (peso alto)
+            for word in query_words:
+                if word in table_name:
+                    keyword_score += 0.4
+
+            # 3.2 Coincidencias en nombres de columnas (peso medio)
+            column_matches = 0
+            for col in table.get('columns', []):
+                col_name = col.get('name', '').lower()
+                for word in query_words:
+                    if word in col_name:
+                        column_matches += 1
+                        break  # Solo contar una vez por columna
+
+            if column_matches > 0:
+                # Normalizar: 1 match = 0.2, 3 matches = 0.6, 5+ matches = 1.0
+                keyword_score += min(column_matches / 5.0, 1.0) * 0.4
+
+            # 3.3 Coincidencias en descripción (peso bajo)
+            desc_matches = sum(1 for word in query_words if word in table_desc)
+            if desc_matches > 0:
+                keyword_score += min(desc_matches / 10.0, 1.0) * 0.2
+
+            # === COMBINAR SCORES CON PESOS CONFIGURABLES ===
+            final_score = (
+                semantic_score * config.rag.weight_similarity +
+                importance_score * config.rag.weight_table_importance +
+                keyword_score * config.rag.weight_keyword_match
+            )
+
+            # Guardar scores detallados para debugging
+            table['scores_breakdown'] = {
+                'original_similarity': semantic_score,
+                'importance': importance_score,
+                'keyword_match': keyword_score,
+                'final': final_score
+            }
+
+            table['similarity_score'] = max(0, min(1, final_score))  # Clamp a [0, 1]
+
+        # Reordenar por score final
         tables.sort(key=lambda x: x['similarity_score'], reverse=True)
-        
+
+        # Log detallado de scoring
+        logger.info("🎯 Scoring multi-factor aplicado:")
+        for i, table in enumerate(tables[:10], 1):  # Top 10
+            breakdown = table.get('scores_breakdown', {})
+            logger.info(
+                f"  {i}. {table['name']}: "
+                f"Final={breakdown.get('final', 0):.3f} "
+                f"(Sem={breakdown.get('original_similarity', 0):.3f}, "
+                f"Imp={breakdown.get('importance', 0):.3f}, "
+                f"Kw={breakdown.get('keyword_match', 0):.3f})"
+            )
+
         return tables
     
     def _expand_with_related_tables(self, tables: List[Dict[str, Any]], max_related: int = 5) -> List[Dict[str, Any]]:
@@ -1511,8 +1609,15 @@ class SchemaManager:
                 # Mejorar scoring basado en relaciones y datos
                 relevant_tables = self._adjust_scores_by_context(relevant_tables, query)
 
+                # === FILTRADO FINAL: Limitar al máximo de tablas para SQL ===
+                max_for_sql = config.rag.max_tables_for_sql
+                if len(relevant_tables) > max_for_sql:
+                    logger.info(f"✂️ Limitando de {len(relevant_tables)} tablas a {max_for_sql} (max_tables_for_sql)")
+                    # Mantener solo las top-N por score
+                    relevant_tables = relevant_tables[:max_for_sql]
+
                 # Logging final de todas las tablas (principales + relacionadas)
-                logger.info(f"📋 Total de tablas tras expansión: {len(relevant_tables)}")
+                logger.info(f"📋 Total de tablas tras expansión y filtrado: {len(relevant_tables)}")
                 logger.info("🎯 Tablas finales (principales + relacionadas):")
                 for i, table in enumerate(relevant_tables[:15], 1):  # Primeras 15
                     is_related = " [RELACIONADA]" if table.get('is_related', False) else " [PRINCIPAL]"
