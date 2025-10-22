@@ -96,6 +96,41 @@ function connectWebSocket() {
         }
     });
 
+    // 🎯 NUEVO: Listener para respuesta final de chat (asíncrono)
+    socket.on('chat_response', function(data) {
+        console.log('✅ [chat_response] Respuesta recibida via SocketIO:', data);
+
+        // Remover todos los indicadores de typing
+        const typingIndicators = document.querySelectorAll('[id^="typing-"]');
+        typingIndicators.forEach(indicator => indicator.remove());
+
+        if (data.status === 'error') {
+            // Mostrar error
+            console.error('❌ [chat_response] Error en procesamiento:', data.error);
+            addMessage('assistant', `❌ Error al procesar la consulta:\n\n${data.error}`);
+        } else if (data.status === 'completed') {
+            // Mostrar respuesta exitosa
+            addAssistantMessage(data);
+
+            // Recargar historial de conversaciones
+            loadConversationsHistory();
+        } else {
+            console.warn('⚠️ [chat_response] Estado desconocido:', data.status);
+        }
+
+        // Habilitar controles nuevamente
+        const input = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+        if (input) {
+            input.disabled = false;
+            input.focus();
+        }
+        if (sendButton) {
+            sendButton.disabled = false;
+            sendButton.innerHTML = '<i class="bi bi-send-fill text-lg"></i>';
+        }
+    });
+
     } catch (error) {
         console.error('Error conectando WebSocket:', error);
     }
@@ -810,39 +845,28 @@ async function sendMessage() {
     const typingId = addTypingIndicator();
 
     try {
-        console.log(`🚀 [sendMessage] Enviando consulta al backend (${message.length} chars, sin timeout):`, message);
+        console.log(`🚀 [sendMessage] Enviando consulta al backend (${message.length} chars):`, message);
 
+        // Enviar consulta (respuesta inmediata con task_id)
         const response = await axios.post('/api/chat', {
             message: message,
             session_id: sessionId
         }, {
-            // Timeout de 3 minutos (suficiente para refinamiento de 5 intentos)
-            timeout: 180000,  // 180 segundos = 3 minutos
-            onDownloadProgress: (progressEvent) => {
-                // Actualizar indicador de progreso si es posible
-                console.log('Progreso de descarga:', progressEvent);
-            },
-            onUploadProgress: (progressEvent) => {
-                console.log('Progreso de envío:', progressEvent);
-            }
+            timeout: 10000  // Solo 10 segundos porque responde inmediatamente
         });
 
         const data = response.data;
-        console.log('✅ [sendMessage] Respuesta recibida del backend:', {
-            message: data.message?.substring(0, 100) + '...',
-            has_data: data.has_data,
-            sql_query: data.sql_query ? 'Sí' : 'No',
-            timestamp: data.timestamp
-        });
 
-        // Remover indicador de escritura
-        removeTypingIndicator(typingId);
+        // Verificar que recibimos task_id
+        if (!data.task_id) {
+            throw new Error('No se recibió task_id del servidor');
+        }
 
-        // Agregar respuesta del asistente
-        addAssistantMessage(data);
+        console.log('✅ [sendMessage] Consulta aceptada, task_id:', data.task_id);
+        console.log('⏳ [sendMessage] Esperando respuesta via SocketIO...');
 
-        // Recargar historial de conversaciones
-        loadConversationsHistory();
+        // La respuesta real llegará via SocketIO (ya está configurado el listener)
+        // No remover el typing indicator aquí, se removerá cuando llegue la respuesta
 
     } catch (error) {
         console.error('❌ [sendMessage] Error enviando mensaje:', error);

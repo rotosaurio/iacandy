@@ -261,7 +261,11 @@ def initialize_system():
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
-    """Procesar consulta de chat"""
+    """
+    Procesar consulta de chat de forma ASÍNCRONA.
+    Devuelve task_id inmediatamente y procesa en background.
+    La respuesta se envía via SocketIO cuando esté lista.
+    """
     try:
         logger.info("🎯 [/api/chat] Endpoint llamado")
 
@@ -288,19 +292,62 @@ def chat():
             content=message
         )
 
+        # Generar task_id único
+        task_id = str(uuid.uuid4())
+        logger.info(f"🆔 [/api/chat] Task ID generado: {task_id}")
+
+        # Iniciar procesamiento en background thread
+        import threading
+        thread = threading.Thread(
+            target=process_chat_async,
+            args=(task_id, message, session_id),
+            daemon=True
+        )
+        thread.start()
+
+        logger.info(f"🚀 [/api/chat] Procesamiento iniciado en background (task_id: {task_id})")
+
+        # Devolver task_id INMEDIATAMENTE (< 1 segundo)
+        return jsonify({
+            'task_id': task_id,
+            'session_id': session_id,
+            'status': 'processing',
+            'message': 'Consulta recibida, procesando...'
+        }), 202  # 202 Accepted
+
+    except Exception as e:
+        logger.error(f"❌ [/api/chat] Error procesando chat: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({'error': str(e)}), 500
+
+
+def process_chat_async(task_id: str, message: str, session_id: str):
+    """
+    Procesar consulta de chat en background y enviar resultado via SocketIO.
+
+    Args:
+        task_id: ID único de la tarea
+        message: Mensaje del usuario
+        session_id: ID de sesión
+    """
+    try:
+        logger.info(f"🔄 [ASYNC/{task_id}] Iniciando procesamiento asíncrono")
+
         # Procesar con IA
-        logger.info(f"🤖 [/api/chat] Procesando consulta con IA: {message[:100]}...")
+        logger.info(f"🤖 [ASYNC/{task_id}] Procesando consulta con IA: {message[:100]}...")
 
         response = ai_assistant.chat(message, session_id)
-        logger.info(f"✅ [/api/chat] Respuesta generada correctamente")
+        logger.info(f"✅ [ASYNC/{task_id}] Respuesta generada correctamente")
 
         # Formatear respuesta
         result = {
+            'task_id': task_id,
             'session_id': session_id,
             'message': response.message,
             'sql_query': response.sql_generated,
             'has_data': response.has_data,
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.now().isoformat(),
+            'status': 'completed'
         }
 
         # Preparar datos formateados si hay resultados
@@ -338,16 +385,27 @@ def chat():
             role='assistant',
             content=response.message,
             sql_query=response.sql_generated,
-            data=formatted_data  # Ahora pasamos datos formateados {columns, rows, ...}
+            data=formatted_data
         )
 
-        logger.info(f"📤 [/api/chat] Enviando respuesta al cliente")
-        return jsonify(result)
+        # 🎯 ENVIAR RESPUESTA VIA SOCKETIO
+        logger.info(f"📡 [ASYNC/{task_id}] Enviando respuesta via SocketIO")
+        socketio.emit('chat_response', result)
+
+        logger.info(f"✅ [ASYNC/{task_id}] Procesamiento completado y enviado")
 
     except Exception as e:
-        logger.error(f"❌ [/api/chat] Error procesando chat: {e}")
+        logger.error(f"❌ [ASYNC/{task_id}] Error procesando chat: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify({'error': str(e)}), 500
+
+        # Enviar error via SocketIO
+        socketio.emit('chat_response', {
+            'task_id': task_id,
+            'session_id': session_id,
+            'status': 'error',
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        })
 
 @app.route('/api/export/<format>', methods=['POST'])
 def export_data(format):
