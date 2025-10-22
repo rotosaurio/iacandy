@@ -203,16 +203,27 @@ function clearChat() {
 
 async function checkSystemStatus() {
     try {
-        const response = await axios.get('/api/status');
+        // Actualizar overlay con progreso
+        updateInitOverlay('Verificando estado del sistema...', 10);
+
+        const response = await axios.get('/api/status', { timeout: 10000 });
         const data = response.data;
 
         console.log('Estado del sistema:', data);
 
         if (data.initialized) {
-            systemInitialized = true;
-            onSystemInitialized(data);
+            // Sistema listo
+            updateInitOverlay('Sistema listo ✓', 100);
+
+            // Esperar un momento antes de ocultar overlay
+            setTimeout(() => {
+                hideInitOverlay();
+                systemInitialized = true;
+                onSystemInitialized(data);
+            }, 500);
         } else {
             console.log('Sistema no inicializado, intentando inicializar...');
+            updateInitOverlay('Inicializando sistema...', 30);
             updateStatus('Conectando...', 'warning');
 
             const initBtn = document.getElementById('initButton');
@@ -229,6 +240,15 @@ async function checkSystemStatus() {
         }
     } catch (error) {
         console.error('Error verificando estado del sistema:', error);
+
+        if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+            updateInitOverlay('El sistema está tardando en responder...', 20);
+        } else if (error.response?.status === 503) {
+            updateInitOverlay('Sistema inicializando, por favor espera...', 40);
+        } else {
+            updateInitOverlay('Error conectando al servidor...', 15);
+        }
+
         updateStatus('Error de conexión', 'danger');
 
         // Mostrar botón de inicialización en caso de error
@@ -237,11 +257,15 @@ async function checkSystemStatus() {
             initBtn.style.display = 'inline-block';
             initBtn.classList.remove('hidden');
         }
+
+        // Reintentar
+        setTimeout(checkSystemStatus, 3000);
     }
 }
 
 async function initializeSystem() {
     try {
+        updateInitOverlay('Inicializando Cadnymart AI...', 50);
         showNotification('🍬 Inicializando Cadnymart AI...', 'info');
 
         const initBtn = document.getElementById('initButton');
@@ -249,6 +273,8 @@ async function initializeSystem() {
             initBtn.disabled = true;
             initBtn.innerHTML = '<i class="bi bi-gear animate-spin"></i> Inicializando...';
         }
+
+        updateInitOverlay('Cargando esquema de base de datos...', 70);
 
         const response = await axios.post('/api/initialize', {}, {
             timeout: 30000, // 30 segundos timeout para inicialización
@@ -260,24 +286,34 @@ async function initializeSystem() {
         const data = response.data;
 
         if (data.status === 'initialized' || data.status === 'already_initialized') {
-            systemInitialized = true;
-            onSystemInitialized(data);
+            updateInitOverlay('Finalizando inicialización...', 90);
 
-            const timeMsg = data.initialization_time ? ` en ${data.initialization_time.toFixed(1)}s` : '';
-            showNotification(`✅ ¡Sistema listo${timeMsg}! Ya puedes hacer consultas`, 'success');
+            setTimeout(() => {
+                updateInitOverlay('Sistema listo ✓', 100);
 
-            // Ocultar botón después de inicialización exitosa
-            if (initBtn) {
-                initBtn.style.display = 'none';
-            }
+                setTimeout(() => {
+                    hideInitOverlay();
+                    systemInitialized = true;
+                    onSystemInitialized(data);
 
-            // Si es esquema básico, mostrar que embeddings se están procesando
-            if (data.is_basic_schema) {
-                showNotification('🔄 Procesando embeddings avanzados en segundo plano...', 'info');
-            }
+                    const timeMsg = data.initialization_time ? ` en ${data.initialization_time.toFixed(1)}s` : '';
+                    showNotification(`✅ ¡Sistema listo${timeMsg}! Ya puedes hacer consultas`, 'success');
+
+                    // Ocultar botón después de inicialización exitosa
+                    if (initBtn) {
+                        initBtn.style.display = 'none';
+                    }
+
+                    // Si es esquema básico, mostrar que embeddings se están procesando
+                    if (data.is_basic_schema) {
+                        showNotification('🔄 Procesando embeddings avanzados en segundo plano...', 'info');
+                    }
+                }, 500);
+            }, 300);
         }
     } catch (error) {
         console.error('Error inicializando sistema:', error);
+        updateInitOverlay('Error en la inicialización...', 25);
 
         let errorMessage = '❌ Error al inicializar el sistema.';
         if (error.code === 'ECONNABORTED') {
@@ -329,11 +365,13 @@ function onSystemInitialized(data) {
         statusBadge.className = 'badge bg-success text-white';
     }
 
-
     // Actualizar estadísticas
     if (data.schema && data.schema.stats) {
         updateSchemaStats(data.schema.stats);
     }
+
+    // CARGAR HISTORIAL DE CONVERSACIONES cuando el sistema esté listo
+    loadConversationsHistory();
 
     showNotification('✅ Sistema listo para recibir consultas', 'success');
 }
@@ -691,7 +729,12 @@ async function sendMessage() {
 
     if (!systemInitialized) {
         console.warn('⚠️ [sendMessage] Sistema no inicializado');
-        showNotification('🍬 El sistema se está inicializando... Espera un momento antes de enviar consultas.', 'info');
+        showNotification('⏳ El sistema se está inicializando... Por favor espera.', 'warning');
+
+        // Deshabilitar input temporalmente
+        input.disabled = true;
+        if (sendButton) sendButton.disabled = true;
+
         return;
     }
 
@@ -1271,15 +1314,19 @@ let isSidebarOpen = false;
 let currentConversationId = null;
 let conversations = {};
 
-// Cargar historial al iniciar
-document.addEventListener('DOMContentLoaded', function() {
-    loadConversationsHistory();
-});
+// El historial se cargará automáticamente cuando el sistema esté listo
+// Ver función checkSystemStatus()
 
 /**
  * Alternar visibilidad del sidebar de historial
  */
 function toggleHistorySidebar() {
+    // Bloquear si no está inicializado
+    if (!systemInitialized) {
+        showNotification('⏳ Sistema aún inicializando. Por favor espera.', 'warning');
+        return;
+    }
+
     const sidebar = document.getElementById('chatHistorySidebar');
     const overlay = document.getElementById('sidebarOverlay');
     const toggleBtn = document.getElementById('toggleSidebarBtn');
@@ -1310,6 +1357,14 @@ async function loadConversationsHistory() {
             renderConversations(conversations);
         }
     } catch (error) {
+        // Si es 503 (sistema inicializando), reintentar silenciosamente
+        if (error.response?.status === 503) {
+            console.log('Sistema aún inicializando, reintentando historial en 3s...');
+            setTimeout(loadConversationsHistory, 3000);
+            return;
+        }
+
+        // Otros errores
         console.error('Error cargando historial:', error);
     }
 }
@@ -1395,19 +1450,36 @@ async function loadConversation(conversationId) {
             // Renderizar mensajes de la conversación
             conversation.messages.forEach(msg => {
                 if (msg.role === 'user') {
-                    addMessageToUI(msg.content, 'user');
+                    addMessage('user', msg.content);
                 } else if (msg.role === 'assistant') {
-                    const responseData = {
-                        message: msg.content,
-                        sql_query: msg.sql_query || null,
-                        has_data: msg.has_data || false
-                    };
-                    displayAIResponse(responseData);
+                    addMessage('assistant', msg.content);
+
+                    // Si hay SQL, agregarlo visualmente
+                    if (msg.sql_query) {
+                        const messagesDiv = document.getElementById('messages');
+                        const sqlDiv = document.createElement('div');
+                        sqlDiv.className = 'sql-query';
+                        sqlDiv.innerHTML = `<pre><code class="language-sql">${escapeHtml(msg.sql_query)}</code></pre>`;
+                        messagesDiv.appendChild(sqlDiv);
+
+                        // Resaltar sintaxis si Prism está disponible
+                        if (typeof Prism !== 'undefined') {
+                            Prism.highlightElement(sqlDiv.querySelector('code'));
+                        }
+                    }
                 }
             });
 
             // Actualizar UI del sidebar
             updateActiveConversation(conversationId);
+
+            // Scroll automático al final
+            setTimeout(() => {
+                const messagesContainer = document.getElementById('messages');
+                if (messagesContainer) {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }
+            }, 100);
 
             // Cerrar sidebar en móvil
             if (window.innerWidth < 992) {
@@ -1631,6 +1703,56 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// ============================================
+// CONTROL DEL OVERLAY DE INICIALIZACIÓN
+// ============================================
+
+/**
+ * Actualizar mensaje y progreso del overlay de inicialización
+ */
+function updateInitOverlay(message, progress) {
+    const overlay = document.getElementById('initOverlay');
+    const messageEl = document.getElementById('initMessage');
+    const progressEl = document.getElementById('initProgress');
+
+    if (overlay && !overlay.classList.contains('hidden')) {
+        if (messageEl) messageEl.textContent = message;
+        if (progressEl) progressEl.style.width = `${progress}%`;
+    }
+}
+
+/**
+ * Ocultar overlay de inicialización
+ */
+function hideInitOverlay() {
+    const overlay = document.getElementById('initOverlay');
+    if (overlay) {
+        overlay.classList.add('hidden');
+
+        // Remover del DOM después de la animación
+        setTimeout(() => {
+            overlay.remove();
+        }, 500);
+    }
+}
+
+/**
+ * Habilitar controles de la interfaz
+ */
+function enableControls() {
+    const messageInput = document.getElementById('messageInput');
+    const sendButton = document.getElementById('sendButton');
+
+    if (messageInput) {
+        messageInput.disabled = false;
+        messageInput.placeholder = 'Pregúntame sobre inventario, ventas, productos... (Ctrl+Enter para enviar)';
+    }
+
+    if (sendButton) {
+        sendButton.disabled = false;
+    }
 }
 
 // ============================================

@@ -1756,3 +1756,124 @@ html {
 /* ============================================
    FIN HISTORIAL DE CONVERSACIONES
    ============================================ */
+
+/* ============================================
+   OVERLAY DE INICIALIZACIÓN GLOBAL
+   ============================================ */
+
+.initialization-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg, rgba(255, 105, 180, 0.95) 0%, rgba(147, 112, 219, 0.95) 100%);
+    backdrop-filter: blur(10px);
+    z-index: 99999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.5s ease, visibility 0.5s ease;
+}
+
+.initialization-overlay.hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.initialization-content {
+    text-align: center;
+    color: white;
+    max-width: 500px;
+    padding: 3rem 2rem;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: var(--border-radius);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.loader-candy {
+    display: flex;
+    justify-content: center;
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.candy-emoji {
+    font-size: 3rem;
+    animation: candyBounceInit 1s ease-in-out infinite;
+}
+
+.candy-emoji:nth-child(1) { animation-delay: 0s; }
+.candy-emoji:nth-child(2) { animation-delay: 0.2s; }
+.candy-emoji:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes candyBounceInit {
+    0%, 100% {
+        transform: translateY(0) rotate(0deg);
+    }
+    50% {
+        transform: translateY(-20px) rotate(10deg);
+    }
+}
+
+.init-title {
+    font-size: 2rem;
+    font-weight: 800;
+    margin-bottom: 1rem;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.init-message {
+    font-size: 1.125rem;
+    margin-bottom: 1.5rem;
+    font-weight: 600;
+}
+
+.progress-bar-container {
+    width: 100%;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 1rem;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #FFD700, #FFA500, #FF69B4);
+    border-radius: 10px;
+    width: 0%;
+    transition: width 0.3s ease;
+    box-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+}
+
+.init-details {
+    font-size: 0.875rem;
+    opacity: 0.9;
+    font-style: italic;
+}
+
+/* Responsive para overlay */
+@media (max-width: 768px) {
+    .initialization-content {
+        padding: 2rem 1.5rem;
+        max-width: 90%;
+    }
+
+    .init-title {
+        font-size: 1.5rem;
+    }
+
+    .init-message {
+        font-size: 1rem;
+    }
+
+    .candy-emoji {
+        font-size: 2rem;
+    }
+}
+
+/* ============================================
+   FIN OVERLAY DE INICIALIZACIÓN
+   ============================================ */

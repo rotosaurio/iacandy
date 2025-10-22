@@ -608,10 +608,27 @@ def test_query_similarity(table_name):
 
 # ============ ENDPOINTS DE HISTORIAL DE CONVERSACIONES ============
 
+# Decorator para requerir que el sistema esté inicializado
+from functools import wraps
+
+def require_initialization(f):
+    """Decorator para requerir que el sistema esté inicializado."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not app_state.get('initialized', False):
+            return jsonify({
+                'status': 'error',
+                'error': 'Sistema aún inicializando. Por favor espera.'
+            }), 503
+        return f(*args, **kwargs)
+    return decorated_function
+
 @app.route('/api/conversations', methods=['GET'])
 def get_conversations():
     """Obtener todas las conversaciones agrupadas por fecha."""
     try:
+        # Permitir cargar historial incluso si no está inicializado
+        # (el historial es independiente del sistema de base de datos)
         grouped = chat_history.get_conversations_grouped_by_date()
         return jsonify({
             'status': 'success',

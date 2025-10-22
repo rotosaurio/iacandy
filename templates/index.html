@@ -81,6 +81,23 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
+    <!-- Overlay de Inicialización GLOBAL -->
+    <div class="initialization-overlay" id="initOverlay">
+        <div class="initialization-content">
+            <div class="loader-candy">
+                <span class="candy-emoji">🍬</span>
+                <span class="candy-emoji">🍭</span>
+                <span class="candy-emoji">🍫</span>
+            </div>
+            <h2 class="init-title">Inicializando Sistema Cadnymart</h2>
+            <p class="init-message" id="initMessage">Conectando a base de datos...</p>
+            <div class="progress-bar-container">
+                <div class="progress-bar-fill" id="initProgress"></div>
+            </div>
+            <p class="init-details" id="initDetails">Por favor espera, esto puede tomar unos momentos...</p>
+        </div>
+    </div>
+
     <!-- Navbar moderno con Tailwind -->
     <nav class="bg-gradient-to-r from-candy-pink via-candy-purple to-candy-orange shadow-candy-lg sticky top-0 z-50 backdrop-blur-sm" role="banner">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
