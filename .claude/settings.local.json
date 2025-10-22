@@ -12,7 +12,10 @@
       "Bash(python:*)",
       "Bash(dir:*)",
       "Bash(findstr:*)",
-      "Bash(Get-Content logsfirebird_ai_assistant.log -Tail 100)"
+      "Bash(Get-Content logsfirebird_ai_assistant.log -Tail 100)",
+      "Bash(.\\venv\\Scripts\\python.exe -m py_compile:*)",
+      "Bash(.venvScriptspython.exe -m py_compile chat_history.py)",
+      "Bash(powershell -Command:*)"
     ],
     "deny": [],
     "ask": []

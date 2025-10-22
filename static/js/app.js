@@ -760,6 +760,9 @@ async function sendMessage() {
         // Agregar respuesta del asistente
         addAssistantMessage(data);
 
+        // Recargar historial de conversaciones
+        loadConversationsHistory();
+
     } catch (error) {
         console.error('❌ [sendMessage] Error enviando mensaje:', error);
         console.error('❌ [sendMessage] Detalles del error:', {
@@ -1258,6 +1261,376 @@ async function manualUpdateStats() {
         // Reiniciar el timer de auto-actualización
         startAutoUpdateSchedule();
     }
+}
+
+// ============================================
+// HISTORIAL DE CONVERSACIONES
+// ============================================
+
+let isSidebarOpen = false;
+let currentConversationId = null;
+let conversations = {};
+
+// Cargar historial al iniciar
+document.addEventListener('DOMContentLoaded', function() {
+    loadConversationsHistory();
+});
+
+/**
+ * Alternar visibilidad del sidebar de historial
+ */
+function toggleHistorySidebar() {
+    const sidebar = document.getElementById('chatHistorySidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    const toggleBtn = document.getElementById('toggleSidebarBtn');
+
+    isSidebarOpen = !isSidebarOpen;
+
+    if (isSidebarOpen) {
+        sidebar.classList.add('open');
+        overlay.classList.add('active');
+        toggleBtn.classList.add('sidebar-open');
+        loadConversationsHistory(); // Recargar al abrir
+    } else {
+        sidebar.classList.remove('open');
+        overlay.classList.remove('active');
+        toggleBtn.classList.remove('sidebar-open');
+    }
+}
+
+/**
+ * Cargar lista de conversaciones desde el servidor
+ */
+async function loadConversationsHistory() {
+    try {
+        const response = await axios.get('/api/conversations');
+
+        if (response.data.status === 'success') {
+            conversations = response.data.conversations;
+            renderConversations(conversations);
+        }
+    } catch (error) {
+        console.error('Error cargando historial:', error);
+    }
+}
+
+/**
+ * Renderizar lista de conversaciones agrupadas por fecha
+ */
+function renderConversations(groupedConversations) {
+    const container = document.getElementById('conversationsList');
+
+    if (!groupedConversations || Object.keys(groupedConversations).length === 0) {
+        container.innerHTML = `
+            <div class="empty-conversations">
+                <i class="bi bi-chat-dots"></i>
+                <p>No hay conversaciones aún</p>
+            </div>
+        `;
+        return;
+    }
+
+    let html = '';
+
+    // Orden de grupos
+    const groupOrder = ['Hoy', 'Ayer', 'Esta semana', 'Este mes', 'Anteriores'];
+
+    groupOrder.forEach(groupName => {
+        const groupConvs = groupedConversations[groupName];
+        if (groupConvs && groupConvs.length > 0) {
+            html += `
+                <div class="date-group">
+                    <div class="date-label">
+                        <i class="bi bi-calendar3"></i>
+                        ${groupName}
+                    </div>
+            `;
+
+            groupConvs.forEach(conv => {
+                const isActive = conv.id === currentConversationId ? 'active' : '';
+                const preview = conv.messages && conv.messages.length > 0
+                    ? conv.messages[0].content.substring(0, 50)
+                    : 'Sin mensajes';
+
+                const timeAgo = formatTimeAgo(conv.updated_at);
+
+                html += `
+                    <div class="conversation-item ${isActive}" onclick="loadConversation('${conv.id}')" data-conv-id="${conv.id}">
+                        <div class="conversation-content">
+                            <div class="conversation-title">${escapeHtml(conv.title)}</div>
+                            <div class="conversation-preview">${escapeHtml(preview)}</div>
+                        </div>
+                        <div class="conversation-time">${timeAgo}</div>
+                        <button class="delete-conversation-btn" onclick="event.stopPropagation(); deleteConversation('${conv.id}')" title="Eliminar conversación">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                `;
+            });
+
+            html += '</div>';
+        }
+    });
+
+    container.innerHTML = html;
+}
+
+/**
+ * Cargar una conversación específica
+ */
+async function loadConversation(conversationId) {
+    try {
+        const response = await axios.get(`/api/conversations/${conversationId}`);
+
+        if (response.data.status === 'success') {
+            const conversation = response.data.conversation;
+
+            // Actualizar session ID actual
+            currentConversationId = conversationId;
+            sessionId = conversationId;
+
+            // Limpiar mensajes actuales
+            clearMessages();
+
+            // Renderizar mensajes de la conversación
+            conversation.messages.forEach(msg => {
+                if (msg.role === 'user') {
+                    addMessageToUI(msg.content, 'user');
+                } else if (msg.role === 'assistant') {
+                    const responseData = {
+                        message: msg.content,
+                        sql_query: msg.sql_query || null,
+                        has_data: msg.has_data || false
+                    };
+                    displayAIResponse(responseData);
+                }
+            });
+
+            // Actualizar UI del sidebar
+            updateActiveConversation(conversationId);
+
+            // Cerrar sidebar en móvil
+            if (window.innerWidth < 992) {
+                toggleHistorySidebar();
+            }
+        }
+    } catch (error) {
+        console.error('Error cargando conversación:', error);
+        showNotification('Error al cargar la conversación', 'danger');
+    }
+}
+
+/**
+ * Iniciar nueva conversación
+ */
+async function startNewConversation() {
+    try {
+        const response = await axios.post('/api/conversations', {
+            title: 'Nueva conversación'
+        });
+
+        if (response.data.status === 'success') {
+            // Generar nuevo session ID
+            sessionId = response.data.session_id;
+            currentConversationId = sessionId;
+
+            // Limpiar mensajes
+            clearMessages();
+
+            // Mostrar mensaje de bienvenida
+            showWelcomeMessage();
+
+            // Recargar historial
+            await loadConversationsHistory();
+
+            // Cerrar sidebar en móvil
+            if (window.innerWidth < 992) {
+                toggleHistorySidebar();
+            }
+
+            showNotification('Nueva conversación iniciada', 'success');
+        }
+    } catch (error) {
+        console.error('Error creando conversación:', error);
+        showNotification('Error al crear nueva conversación', 'danger');
+    }
+}
+
+/**
+ * Eliminar una conversación
+ */
+async function deleteConversation(conversationId) {
+    if (!confirm('¿Estás seguro de eliminar esta conversación?')) {
+        return;
+    }
+
+    try {
+        const response = await axios.delete(`/api/conversations/${conversationId}`);
+
+        if (response.data.status === 'success') {
+            // Si es la conversación actual, limpiar
+            if (conversationId === currentConversationId) {
+                currentConversationId = null;
+                sessionId = generateUUID();
+                clearMessages();
+                showWelcomeMessage();
+            }
+
+            // Recargar historial
+            await loadConversationsHistory();
+
+            showNotification('Conversación eliminada', 'success');
+        }
+    } catch (error) {
+        console.error('Error eliminando conversación:', error);
+        showNotification('Error al eliminar la conversación', 'danger');
+    }
+}
+
+/**
+ * Buscar conversaciones
+ */
+let searchTimeout = null;
+async function searchConversations(query) {
+    clearTimeout(searchTimeout);
+
+    if (!query || query.trim().length === 0) {
+        loadConversationsHistory();
+        return;
+    }
+
+    searchTimeout = setTimeout(async () => {
+        try {
+            const response = await axios.post('/api/conversations/search', {
+                query: query.trim()
+            });
+
+            if (response.data.status === 'success') {
+                // Renderizar resultados de búsqueda (no agrupados por fecha)
+                const results = response.data.results;
+                renderSearchResults(results);
+            }
+        } catch (error) {
+            console.error('Error buscando conversaciones:', error);
+        }
+    }, 300);
+}
+
+/**
+ * Renderizar resultados de búsqueda
+ */
+function renderSearchResults(results) {
+    const container = document.getElementById('conversationsList');
+
+    if (!results || results.length === 0) {
+        container.innerHTML = `
+            <div class="empty-conversations">
+                <i class="bi bi-search"></i>
+                <p>No se encontraron conversaciones</p>
+            </div>
+        `;
+        return;
+    }
+
+    let html = '<div class="date-group"><div class="date-label"><i class="bi bi-search"></i>Resultados</div>';
+
+    results.forEach(conv => {
+        const isActive = conv.id === currentConversationId ? 'active' : '';
+        const preview = conv.messages && conv.messages.length > 0
+            ? conv.messages[0].content.substring(0, 50)
+            : 'Sin mensajes';
+        const timeAgo = formatTimeAgo(conv.updated_at);
+
+        html += `
+            <div class="conversation-item ${isActive}" onclick="loadConversation('${conv.id}')" data-conv-id="${conv.id}">
+                <div class="conversation-content">
+                    <div class="conversation-title">${escapeHtml(conv.title)}</div>
+                    <div class="conversation-preview">${escapeHtml(preview)}</div>
+                </div>
+                <div class="conversation-time">${timeAgo}</div>
+                <button class="delete-conversation-btn" onclick="event.stopPropagation(); deleteConversation('${conv.id}')" title="Eliminar conversación">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </div>
+        `;
+    });
+
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+/**
+ * Actualizar conversación activa en el sidebar
+ */
+function updateActiveConversation(conversationId) {
+    // Remover clase active de todos
+    document.querySelectorAll('.conversation-item').forEach(item => {
+        item.classList.remove('active');
+    });
+
+    // Agregar clase active al seleccionado
+    const activeItem = document.querySelector(`[data-conv-id="${conversationId}"]`);
+    if (activeItem) {
+        activeItem.classList.add('active');
+    }
+}
+
+/**
+ * Limpiar mensajes del chat
+ */
+function clearMessages() {
+    const messagesContainer = document.getElementById('messages');
+    const welcomeMessage = document.getElementById('welcomeMessage');
+
+    if (messagesContainer) {
+        messagesContainer.innerHTML = '';
+        messagesContainer.style.display = 'none';
+    }
+
+    if (welcomeMessage) {
+        welcomeMessage.style.display = 'none';
+    }
+}
+
+/**
+ * Mostrar mensaje de bienvenida
+ */
+function showWelcomeMessage() {
+    const messagesContainer = document.getElementById('messages');
+    const welcomeMessage = document.getElementById('welcomeMessage');
+
+    if (messagesContainer) {
+        messagesContainer.style.display = 'none';
+    }
+
+    if (welcomeMessage) {
+        welcomeMessage.style.display = 'block';
+    }
+}
+
+/**
+ * Formatear tiempo relativo (ej: "hace 5 min")
+ */
+function formatTimeAgo(dateString) {
+    const date = new Date(dateString);
+    const now = new Date();
+    const seconds = Math.floor((now - date) / 1000);
+
+    if (seconds < 60) return 'Ahora';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)} min`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)} h`;
+    if (seconds < 604800) return `${Math.floor(seconds / 86400)} d`;
+
+    return date.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+}
+
+/**
+ * Escapar HTML para prevenir XSS
+ */
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 // ============================================

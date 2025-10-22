@@ -38,6 +38,7 @@ from schema_manager import schema_manager
 from ai_assistant import ai_assistant
 from report_generator import report_generator
 from utils import logger, DataFormatter
+from chat_history import chat_history
 
 # Crear aplicación Flask
 app = Flask(__name__)
@@ -280,12 +281,28 @@ def chat():
             logger.warning("⚠️ [/api/chat] Sistema no inicializado")
             return jsonify({'error': 'Sistema no inicializado'}), 503
 
+        # Guardar mensaje del usuario en historial
+        chat_history.add_message(
+            session_id=session_id,
+            role='user',
+            content=message
+        )
+
         # Procesar con IA
         logger.info(f"🤖 [/api/chat] Procesando consulta con IA: {message[:100]}...")
 
         response = ai_assistant.chat(message, session_id)
         logger.info(f"✅ [/api/chat] Respuesta generada correctamente")
-        
+
+        # Guardar respuesta del asistente en historial
+        chat_history.add_message(
+            session_id=session_id,
+            role='assistant',
+            content=response.message,
+            sql_query=response.sql_generated,
+            data=response.data if response.has_data else None
+        )
+
         # Formatear respuesta
         result = {
             'session_id': session_id,
@@ -294,7 +311,7 @@ def chat():
             'has_data': response.has_data,
             'timestamp': datetime.now().isoformat()
         }
-        
+
         # Agregar datos si hay resultados
         if response.has_data and response.data:
             df = pd.DataFrame(response.data)
@@ -588,6 +605,128 @@ def test_query_similarity(table_name):
     except Exception as e:
         logger.error(f"Error probando similitud con tabla {table_name}", e)
         return jsonify({'error': str(e)}), 500
+
+# ============ ENDPOINTS DE HISTORIAL DE CONVERSACIONES ============
+
+@app.route('/api/conversations', methods=['GET'])
+def get_conversations():
+    """Obtener todas las conversaciones agrupadas por fecha."""
+    try:
+        grouped = chat_history.get_conversations_grouped_by_date()
+        return jsonify({
+            'status': 'success',
+            'conversations': grouped
+        })
+    except Exception as e:
+        logger.error(f"Error obteniendo conversaciones: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/conversations/<session_id>', methods=['GET'])
+def get_conversation(session_id):
+    """Obtener una conversación específica."""
+    try:
+        conversation = chat_history.get_conversation(session_id)
+        if not conversation:
+            return jsonify({'error': 'Conversación no encontrada'}), 404
+
+        return jsonify({
+            'status': 'success',
+            'conversation': conversation
+        })
+    except Exception as e:
+        logger.error(f"Error obteniendo conversación {session_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/conversations', methods=['POST'])
+def create_conversation():
+    """Crear nueva conversación."""
+    try:
+        data = request.json or {}
+        title = data.get('title', 'Nueva conversación')
+
+        session_id = chat_history.create_conversation(title=title)
+
+        return jsonify({
+            'status': 'success',
+            'session_id': session_id
+        })
+    except Exception as e:
+        logger.error(f"Error creando conversación: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/conversations/<session_id>', methods=['PUT'])
+def update_conversation(session_id):
+    """Actualizar título de conversación."""
+    try:
+        data = request.json
+        new_title = data.get('title')
+
+        if not new_title:
+            return jsonify({'error': 'Título requerido'}), 400
+
+        chat_history.update_conversation_title(session_id, new_title)
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Título actualizado'
+        })
+    except Exception as e:
+        logger.error(f"Error actualizando conversación {session_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/conversations/<session_id>', methods=['DELETE'])
+def delete_conversation(session_id):
+    """Eliminar una conversación."""
+    try:
+        success = chat_history.delete_conversation(session_id)
+
+        if not success:
+            return jsonify({'error': 'Conversación no encontrada'}), 404
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Conversación eliminada'
+        })
+    except Exception as e:
+        logger.error(f"Error eliminando conversación {session_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/conversations/search', methods=['POST'])
+def search_conversations():
+    """Buscar conversaciones por texto."""
+    try:
+        data = request.json
+        query = data.get('query', '').strip()
+
+        if not query:
+            return jsonify({'error': 'Query de búsqueda requerida'}), 400
+
+        results = chat_history.search_conversations(query)
+
+        return jsonify({
+            'status': 'success',
+            'results': results,
+            'count': len(results)
+        })
+    except Exception as e:
+        logger.error(f"Error buscando conversaciones: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/conversations/clear', methods=['POST'])
+def clear_all_conversations():
+    """Eliminar todas las conversaciones."""
+    try:
+        chat_history.clear_all_conversations()
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Todas las conversaciones eliminadas'
+        })
+    except Exception as e:
+        logger.error(f"Error limpiando conversaciones: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ===================================================================
 
 @socketio.on('connect')
 def handle_connect():

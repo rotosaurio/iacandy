@@ -149,6 +149,52 @@
         </div>
     </nav>
 
+    <!-- Sidebar de Historial de Conversaciones -->
+    <div class="chat-history-sidebar" id="chatHistorySidebar">
+        <!-- Header -->
+        <div class="sidebar-header">
+            <div class="sidebar-title">
+                <i class="bi bi-clock-history"></i>
+                <span>Historial</span>
+            </div>
+            <button class="sidebar-close-btn" onclick="toggleHistorySidebar()" aria-label="Cerrar historial">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </div>
+
+        <!-- Botón Nueva Conversación -->
+        <button class="new-chat-btn" onclick="startNewConversation()">
+            <i class="bi bi-plus-circle-fill"></i>
+            <span>Nueva Conversación</span>
+        </button>
+
+        <!-- Búsqueda -->
+        <div class="sidebar-search">
+            <input type="text"
+                   id="conversationSearch"
+                   placeholder="Buscar conversaciones..."
+                   onkeyup="searchConversations(this.value)"
+                   aria-label="Buscar en historial">
+        </div>
+
+        <!-- Lista de Conversaciones -->
+        <div class="conversations-list" id="conversationsList">
+            <!-- Las conversaciones se cargarán dinámicamente aquí -->
+            <div class="empty-conversations">
+                <i class="bi bi-chat-dots"></i>
+                <p>No hay conversaciones aún</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Overlay para móvil -->
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleHistorySidebar()"></div>
+
+    <!-- Botón flotante para abrir sidebar -->
+    <button class="toggle-sidebar-btn" id="toggleSidebarBtn" onclick="toggleHistorySidebar()" title="Historial de conversaciones" aria-label="Abrir historial">
+        <i class="bi bi-clock-history"></i>
+    </button>
+
     <div class="container-fluid h-100">
         <div class="row h-100">
             <!-- Panel principal - Chat Rediseñado con Tailwind (ancho completo) -->
