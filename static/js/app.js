@@ -1470,6 +1470,18 @@ async function loadConversation(conversationId) {
                 }
             });
 
+            // MOSTRAR el contenedor de mensajes (fix para que se vea el chat)
+            const messagesDiv = document.getElementById('messages');
+            if (messagesDiv) {
+                messagesDiv.style.display = 'block';
+            }
+
+            // Ocultar mensaje de bienvenida si está visible
+            const welcomeMessage = document.getElementById('welcomeMessage');
+            if (welcomeMessage) {
+                welcomeMessage.style.display = 'none';
+            }
+
             // Actualizar UI del sidebar
             updateActiveConversation(conversationId);
 
