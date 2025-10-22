@@ -294,15 +294,6 @@ def chat():
         response = ai_assistant.chat(message, session_id)
         logger.info(f"✅ [/api/chat] Respuesta generada correctamente")
 
-        # Guardar respuesta del asistente en historial
-        chat_history.add_message(
-            session_id=session_id,
-            role='assistant',
-            content=response.message,
-            sql_query=response.sql_generated,
-            data=response.data if response.has_data else None
-        )
-
         # Formatear respuesta
         result = {
             'session_id': session_id,
@@ -312,7 +303,8 @@ def chat():
             'timestamp': datetime.now().isoformat()
         }
 
-        # Agregar datos si hay resultados
+        # Preparar datos formateados si hay resultados
+        formatted_data = None
         if response.has_data and response.data:
             df = pd.DataFrame(response.data)
 
@@ -325,7 +317,7 @@ def chat():
             # Limitar preview a 100 filas
             preview_df = df.head(100)
 
-            result['data'] = {
+            formatted_data = {
                 'columns': df.columns.tolist(),
                 'rows': preview_df.values.tolist(),
                 'total_rows': len(df),
@@ -333,10 +325,21 @@ def chat():
                 'truncated': len(df) > 100
             }
 
+            result['data'] = formatted_data
+
             # Guardar DataFrame completo en sesión para exportación
             if session_id not in app_state['sessions']:
                 app_state['sessions'][session_id] = {}
             app_state['sessions'][session_id]['last_data'] = df
+
+        # Guardar respuesta del asistente en historial con datos formateados
+        chat_history.add_message(
+            session_id=session_id,
+            role='assistant',
+            content=response.message,
+            sql_query=response.sql_generated,
+            data=formatted_data  # Ahora pasamos datos formateados {columns, rows, ...}
+        )
 
         logger.info(f"📤 [/api/chat] Enviando respuesta al cliente")
         return jsonify(result)

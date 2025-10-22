@@ -126,7 +126,9 @@ class ChatHistory:
 
         if data:
             message['has_data'] = True
-            # No guardamos los datos completos por tamaño, solo indicador
+            # Los datos ya vienen formateados como {columns, rows, total_rows, truncated}
+            # Solo guardarlos directamente
+            message['data_preview'] = data
 
         conversation['messages'].append(message)
         conversation['updated_at'] = datetime.now().isoformat()

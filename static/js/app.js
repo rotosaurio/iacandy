@@ -1467,6 +1467,15 @@ async function loadConversation(conversationId) {
                             Prism.highlightElement(sqlDiv.querySelector('code'));
                         }
                     }
+
+                    // Si hay datos guardados, mostrarlos
+                    if (msg.has_data && msg.data_preview) {
+                        const messagesDiv = document.getElementById('messages');
+                        const dataHtml = renderDataTable(msg.data_preview);
+                        const dataDiv = document.createElement('div');
+                        dataDiv.innerHTML = dataHtml;
+                        messagesDiv.appendChild(dataDiv);
+                    }
                 }
             });
 
