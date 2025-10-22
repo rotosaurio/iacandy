@@ -159,6 +159,78 @@ COLUMN_SEMANTICS = {
     }
 }
 
+# ============================================================================
+# DICCIONARIO DE SINÓNIMOS DE NEGOCIO PARA RAG
+# ============================================================================
+# Este diccionario mapea términos coloquiales del usuario a términos técnicos
+# de la base de datos. Se usa para expandir queries antes de generar embeddings
+# y mejorar la precisión de la búsqueda de tablas relevantes.
+# ============================================================================
+
+BUSINESS_SYNONYMS = {
+    # Almacenes/Sucursales/Tiendas
+    'sucursal': ['almacén', 'almacenes', 'bodega', 'punto de venta', 'tienda', 'ubicación', 'sede'],
+    'sucursales': ['almacén', 'almacenes', 'bodegas', 'puntos de venta', 'tiendas', 'ubicaciones', 'sedes'],
+    'tienda': ['almacén', 'almacenes', 'sucursal', 'punto de venta', 'bodega', 'ubicación'],
+    'tiendas': ['almacén', 'almacenes', 'sucursales', 'puntos de venta', 'bodegas', 'ubicaciones'],
+    'almacen': ['sucursal', 'tienda', 'bodega', 'warehouse', 'punto de venta'],
+    'almacenes': ['sucursales', 'tiendas', 'bodegas', 'warehouses', 'puntos de venta'],
+    'bodega': ['almacén', 'sucursal', 'warehouse', 'tienda'],
+    'bodegas': ['almacenes', 'sucursales', 'warehouses', 'tiendas'],
+    'punto de venta': ['almacén', 'sucursal', 'tienda', 'pos'],
+    'puntos de venta': ['almacenes', 'sucursales', 'tiendas', 'pos'],
+
+    # Productos/Artículos
+    'producto': ['artículo', 'artículos', 'item', 'items', 'mercancía', 'sku'],
+    'productos': ['artículos', 'artículo', 'items', 'item', 'mercancías', 'skus'],
+    'articulo': ['producto', 'item', 'mercancía', 'sku'],
+    'articulos': ['productos', 'items', 'mercancías', 'skus'],
+    'item': ['artículo', 'producto', 'mercancía'],
+    'items': ['artículos', 'productos', 'mercancías'],
+    'mercancia': ['producto', 'artículo', 'item'],
+    'mercancias': ['productos', 'artículos', 'items'],
+
+    # Clientes
+    'cliente': ['comprador', 'consumidor', 'cuenta'],
+    'clientes': ['compradores', 'consumidores', 'cuentas'],
+    'comprador': ['cliente', 'consumidor'],
+    'compradores': ['clientes', 'consumidores'],
+    'consumidor': ['cliente', 'comprador'],
+    'consumidores': ['clientes', 'compradores'],
+
+    # Ventas
+    'venta': ['factura', 'ticket', 'transacción', 'pedido'],
+    'ventas': ['facturas', 'tickets', 'transacciones', 'pedidos'],
+    'factura': ['venta', 'documento de venta', 'invoice'],
+    'facturas': ['ventas', 'documentos de venta', 'invoices'],
+    'ticket': ['venta', 'factura', 'comprobante'],
+    'tickets': ['ventas', 'facturas', 'comprobantes'],
+
+    # Vendedores/Agentes
+    'vendedor': ['agente', 'empleado', 'asesor', 'representante'],
+    'vendedores': ['agentes', 'empleados', 'asesores', 'representantes'],
+    'agente': ['vendedor', 'empleado', 'asesor'],
+    'agentes': ['vendedores', 'empleados', 'asesores'],
+    'asesor': ['vendedor', 'agente', 'empleado'],
+    'asesores': ['vendedores', 'agentes', 'empleados'],
+
+    # Inventario/Stock
+    'inventario': ['stock', 'existencias', 'existencia', 'disponibilidad'],
+    'stock': ['inventario', 'existencias', 'existencia', 'disponibilidad'],
+    'existencia': ['inventario', 'stock', 'disponibilidad'],
+    'existencias': ['inventario', 'stock', 'disponibilidad'],
+
+    # Proveedores
+    'proveedor': ['vendor', 'supplier', 'abastecedor'],
+    'proveedores': ['vendors', 'suppliers', 'abastecedores'],
+
+    # Precios
+    'precio': ['costo', 'valor', 'importe', 'tarifa'],
+    'precios': ['costos', 'valores', 'importes', 'tarifas'],
+    'costo': ['precio', 'valor'],
+    'costos': ['precios', 'valores'],
+}
+
 
 class EmbeddingGenerator:
     """Generador de embeddings usando OpenAI API directamente (hardcodeado)."""
@@ -1775,7 +1847,44 @@ class SchemaManager:
             'tables_with_foreign_keys': len([t for t in schema.values() if t.foreign_keys]),
             'last_update': datetime.now().isoformat()
         }
-    
+
+    def _expand_query_with_synonyms(self, query: str) -> str:
+        """
+        Expandir query con sinónimos del dominio antes de generar embedding.
+
+        Esto mejora la precisión de RAG al mapear términos coloquiales del usuario
+        (ej: "sucursal", "tienda") a términos técnicos de la base de datos (ej: "almacén").
+
+        Args:
+            query: Query original del usuario
+
+        Returns:
+            Query expandido con sinónimos relevantes
+
+        Ejemplo:
+            >>> _expand_query_with_synonyms("ventas por sucursal")
+            "ventas por sucursal almacén almacenes bodega punto de venta tienda ubicación sede"
+        """
+        query_lower = query.lower()
+        expanded_parts = [query]  # Mantener query original
+
+        # Buscar sinónimos en el query
+        for term, synonyms in BUSINESS_SYNONYMS.items():
+            # Buscar el término como palabra completa (no subcadena)
+            # Usar \b para word boundaries
+            import re
+            pattern = r'\b' + re.escape(term) + r'\b'
+
+            if re.search(pattern, query_lower):
+                # Agregar los primeros 3 sinónimos más relevantes
+                # (evitar expandir demasiado que puede diluir la búsqueda)
+                expanded_parts.extend(synonyms[:3])
+
+        # Unir todo, eliminando duplicados
+        expanded_query = ' '.join(expanded_parts)
+
+        return expanded_query
+
     @timing_decorator("Table Search")
     def find_relevant_tables(self, query: str, max_tables: int = None, expand_relations: bool = True) -> List[Dict[str, Any]]:
         """
@@ -1797,9 +1906,17 @@ class SchemaManager:
             if not self.schema_cache:
                 logger.info("Esquema no cargado, cargando ahora...")
                 self.load_and_process_schema()
-            
-            # Generar embedding de la consulta
-            query_embedding = self.embedding_generator.generate_embedding(query)
+
+            # 🚀 EXPANSIÓN DE SINÓNIMOS: Mejorar precisión de RAG
+            logger.info(f"🔍 Query original: '{query}'")
+            expanded_query = self._expand_query_with_synonyms(query)
+            if expanded_query != query:
+                logger.info(f"🔍 Query expandido con sinónimos: '{expanded_query[:200]}...'")
+            else:
+                logger.info(f"🔍 Sin sinónimos encontrados, usando query original")
+
+            # Generar embedding de la consulta EXPANDIDA
+            query_embedding = self.embedding_generator.generate_embedding(expanded_query)
             
             # Buscar tablas similares
             similar_tables = self.vector_store.search_similar_tables(

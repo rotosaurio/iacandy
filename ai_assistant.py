@@ -23,6 +23,36 @@ from query_complexity_analyzer import model_selector, QueryComplexity
 from stored_procedures_manager import procedures_manager
 
 
+def emit_refinement_progress(message: str, attempt: int = 0, max_attempts: int = 5, error: str = None):
+    """
+    Emitir progreso de refinamiento via SocketIO para feedback en tiempo real.
+
+    Args:
+        message: Mensaje de progreso
+        attempt: Intento actual
+        max_attempts: Total de intentos
+        error: Error actual (opcional)
+    """
+    try:
+        # Importar aquí para evitar circular imports
+        from flask import current_app
+
+        if current_app:
+            socketio = current_app.extensions.get('socketio')
+            if socketio:
+                socketio.emit('refinement_progress', {
+                    'message': message,
+                    'attempt': attempt,
+                    'max_attempts': max_attempts,
+                    'error': error[:100] if error else None,
+                    'timestamp': datetime.now().isoformat()
+                })
+                logger.info(f"📡 Progreso emitido via SocketIO: {message}")
+    except Exception as e:
+        # No fallar si socketio no está disponible
+        logger.debug(f"No se pudo emitir progreso via SocketIO: {e}")
+
+
 def is_reasoning_model(model_name: str) -> bool:
     """
     Detecta si el modelo es un modelo de razonamiento que NO soporta temperature.
@@ -350,6 +380,25 @@ Generas consultas SQL AVANZADAS, ULTRA-OPTIMIZADAS y con CAPACIDAD MULTI-TABLA E
 
 🚨 **REGLA CRÍTICA PARA VENTAS EN MICROSIP**:
 - En consultas de ventas: Usa ÚNICAMENTE TIPO_DOCTO = 'V'. NUNCA agregues ESTATUS = 'A' o CANCELADO = 'N' - estos filtros NO aplican y causan errores.
+
+📌 **MAPEO DE TÉRMINOS DE NEGOCIO A TABLAS DE BASE DE DATOS**:
+**IMPORTANTE**: El usuario usa términos coloquiales que debes mapear a las tablas correctas:
+
+- **"sucursal" / "tienda" / "punto de venta"** → Usar tabla **ALMACENES** (columna ALMACEN_ID)
+  - Ejemplo: "ventas por sucursal" → GROUP BY al.ALMACEN_ID con JOIN a ALMACENES
+  - La tabla SUCURSALES es de configuración; los datos operacionales están en ALMACENES
+
+- **"bodega" / "warehouse"** → Tabla **ALMACENES**
+
+- **"producto" / "item" / "mercancía"** → Tabla **ARTICULOS** (columna ARTICULO_ID)
+
+- **"vendedor" / "asesor"** → Tabla **EMPLEADOS** o **AGENTES** (EMPLEADO_ID / AGENTE_ID)
+
+- **"cliente" / "comprador"** → Tabla **CLIENTES** (columna CLIENTE_ID)
+
+- **"inventario" / "stock"** → Tabla **EXISTENCIAS** o **SALDOS_IN**
+
+⚠️ **CRÍTICO**: Si el usuario dice "sucursal" o "tienda", SIEMPRE usa la tabla ALMACENES, NO SUCURSALES.
 
 📌 **REGLAS DE ORO PARA QUERIES RÁPIDAS**:
 
@@ -1499,6 +1548,14 @@ class AIAssistant:
                 logger.info(f"🔄 [SQL_QUERY] Intento {retry_count}/{max_retries} de refinamiento SQL...")
                 logger.info(f"❌ [SQL_QUERY] Error actual: {query_result.error}")
 
+                # 📡 Emitir progreso a frontend via SocketIO
+                emit_refinement_progress(
+                    message=f"🔄 Refinando consulta (intento {retry_count}/{max_retries})...",
+                    attempt=retry_count,
+                    max_attempts=max_retries,
+                    error=query_result.error
+                )
+
                 try:
                     logger.info("🔧 [SQL_QUERY] Iniciando refinamiento de SQL...")
                     refined_sql, changes = self.sql_generator.refine_sql(sql_query, query_result.error)
@@ -1513,6 +1570,14 @@ class AIAssistant:
                         # ✅ Éxito!
                         sql_query = refined_sql
                         logger.info(f"✅ [SQL_QUERY] SQL refinado exitosamente después de {retry_count} intento(s)")
+
+                        # 📡 Emitir éxito
+                        emit_refinement_progress(
+                            message=f"✅ Consulta refinada exitosamente en intento {retry_count}",
+                            attempt=retry_count,
+                            max_attempts=max_retries,
+                            error=None
+                        )
                         break
                     else:
                         # Actualizar SQL para el próximo intento

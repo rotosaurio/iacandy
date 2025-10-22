@@ -80,6 +80,22 @@ function connectWebSocket() {
         console.log('Estado actualizado:', data);
             showNotification(data.message, data.type || 'info');
     });
+
+    socket.on('refinement_progress', function(data) {
+        console.log('🔄 Progreso de refinamiento:', data);
+
+        // Actualizar indicador de typing con progreso específico
+        updateTypingIndicator(data.message);
+
+        // Mostrar notificación temporal (3 segundos)
+        showNotification(data.message, 'info', 3000);
+
+        // Si hay error, mostrarlo en consola para debugging
+        if (data.error) {
+            console.warn(`⚠️ Error en intento ${data.attempt}/${data.max_attempts}:`, data.error);
+        }
+    });
+
     } catch (error) {
         console.error('Error conectando WebSocket:', error);
     }
@@ -728,14 +744,33 @@ async function sendMessage() {
     });
 
     if (!systemInitialized) {
-        console.warn('⚠️ [sendMessage] Sistema no inicializado');
-        showNotification('⏳ El sistema se está inicializando... Por favor espera.', 'warning');
+        console.warn('⚠️ [sendMessage] Sistema no inicializado localmente, verificando backend...');
 
-        // Deshabilitar input temporalmente
-        input.disabled = true;
-        if (sendButton) sendButton.disabled = true;
-
-        return;
+        // Verificar con el backend por si hay desincronización (race condition)
+        try {
+            const statusCheck = await axios.get('/api/status', { timeout: 3000 });
+            if (statusCheck.data.initialized) {
+                // Backend SÍ está listo, actualizar variable local y continuar
+                console.log('✅ [sendMessage] Backend está listo, actualizando variable local');
+                systemInitialized = true;
+                onSystemInitialized(statusCheck.data);
+                // Continuar con el envío del mensaje (no return)
+            } else {
+                // Backend realmente NO está listo
+                console.warn('⚠️ [sendMessage] Backend confirma que no está inicializado');
+                showNotification('⏳ El sistema se está inicializando... Por favor espera.', 'warning');
+                input.disabled = true;
+                if (sendButton) sendButton.disabled = true;
+                return;
+            }
+        } catch (e) {
+            // Error verificando estado, asumir no inicializado
+            console.error('❌ [sendMessage] Error verificando estado:', e);
+            showNotification('⏳ El sistema se está inicializando... Por favor espera.', 'warning');
+            input.disabled = true;
+            if (sendButton) sendButton.disabled = true;
+            return;
+        }
     }
 
     // Verificación adicional: asegurarse de que el backend esté respondiendo
@@ -781,11 +816,14 @@ async function sendMessage() {
             message: message,
             session_id: sessionId
         }, {
-            // SIN timeout - esperar lo que sea necesario
-            timeout: 0,
+            // Timeout de 3 minutos (suficiente para refinamiento de 5 intentos)
+            timeout: 180000,  // 180 segundos = 3 minutos
             onDownloadProgress: (progressEvent) => {
                 // Actualizar indicador de progreso si es posible
                 console.log('Progreso de descarga:', progressEvent);
+            },
+            onUploadProgress: (progressEvent) => {
+                console.log('Progreso de envío:', progressEvent);
             }
         });
 
@@ -829,8 +867,21 @@ async function sendMessage() {
             } else if (error.response.data && error.response.data.error) {
                 errorMessage += '\n\n' + error.response.data.error;
             }
-        } else if (error.code === 'ECONNABORTED') {
-            errorMessage = '⏱️ La consulta tardó demasiado tiempo. Intenta con una consulta más específica o divide tu pregunta en partes más pequeñas.';
+        } else if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+            errorMessage = `⏱️ La consulta tardó más de 3 minutos (timeout).
+
+**Posibles causas:**
+• Query muy compleja que requiere múltiples refinamientos
+• Base de datos muy grande con millones de registros
+• Sistema refinando SQL automáticamente (hasta 5 intentos)
+
+**Qué puedes hacer:**
+💡 Intenta con una consulta más específica (ej: agregar rango de fechas)
+💡 Divide tu pregunta en partes más pequeñas
+💡 Usa filtros más restrictivos (ej: "últimos 30 días" en vez de "todo el año")
+
+El sistema intentó corregir automáticamente el SQL pero no fue suficiente. Una consulta más específica ayudará.`;
+            canRetry = true;
         } else if (error.code === 'NETWORK_ERROR' || error.message.includes('Network')) {
             errorMessage = '🌐 Error de conexión. Verifica tu conexión a internet e intenta nuevamente.';
             canRetry = true;
@@ -1017,6 +1068,38 @@ function removeTypingIndicator(typingId) {
     const typingDiv = document.getElementById(typingId);
     if (typingDiv) {
         typingDiv.remove();
+    }
+}
+
+function updateTypingIndicator(message) {
+    /**
+     * Actualizar el mensaje del indicador de typing con progreso específico.
+     * Útil para mostrar estado de refinamiento SQL en tiempo real.
+     */
+    // Buscar el indicador de typing más reciente (el que tiene id que empieza con 'typing-')
+    const messagesDiv = document.getElementById('messages');
+    if (!messagesDiv) return;
+
+    const typingDivs = messagesDiv.querySelectorAll('[id^="typing-"]');
+    if (typingDivs.length === 0) return;
+
+    // Obtener el último indicador de typing
+    const typingDiv = typingDivs[typingDivs.length - 1];
+    const contentDiv = typingDiv.querySelector('.message-content');
+
+    if (contentDiv) {
+        // Actualizar el contenido manteniendo el estilo
+        contentDiv.innerHTML = `
+            <div class="flex items-center gap-3">
+                <div class="flex space-x-1">
+                    <div class="w-2 h-2 bg-candy-pink rounded-full animate-bounce"></div>
+                    <div class="w-2 h-2 bg-candy-purple rounded-full animate-bounce" style="animation-delay: 0.1s;"></div>
+                    <div class="w-2 h-2 bg-candy-orange rounded-full animate-bounce" style="animation-delay: 0.2s;"></div>
+                </div>
+                <span class="text-candy-purple font-medium">${escapeHtml(message)}</span>
+            </div>
+        `;
+        console.log(`✏️ Indicador de typing actualizado: "${message}"`);
     }
 }
 
