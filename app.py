@@ -5,6 +5,10 @@ Firebird AI Assistant - Servidor Web
 Interfaz web para consultar bases de datos Firebird usando IA
 """
 
+# IMPORTANTE: Monkey patch de eventlet DEBE ser lo primero (antes de cualquier import)
+import eventlet
+eventlet.monkey_patch()
+
 import os
 import sys
 import io
@@ -48,18 +52,8 @@ app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max
 # Habilitar CORS
 CORS(app)
 
-# Inicializar SocketIO con configuración optimizada para conexión persistente
-socketio = SocketIO(
-    app,
-    cors_allowed_origins="*",
-    async_mode='threading',
-    # Configuración para mantener conexión WebSocket persistente
-    engineio_logger=False,        # Reducir logs de engineio (connect/disconnect)
-    logger=False,                 # Reducir logs de SocketIO
-    ping_timeout=120,             # 2 minutos antes de considerar desconectado
-    ping_interval=25,             # Enviar ping cada 25 segundos para mantener conexión
-    transports=['websocket']      # SOLO WebSocket (no long-polling) para conexión persistente
-)
+# Inicializar SocketIO con eventlet para producción (compatible con Cloudflare Tunnel)
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 # Estado global de la aplicación
 app_state = {
@@ -860,15 +854,13 @@ def clear_all_conversations():
 @socketio.on('connect')
 def handle_connect():
     """Manejar conexión de WebSocket"""
-    # Log reducido - solo en modo debug si es necesario
-    # logger.info(f"Cliente conectado: {request.sid}")
+    logger.info(f"Cliente conectado: {request.sid}")
     emit('connected', {'message': 'Conectado al servidor'})
 
 @socketio.on('disconnect')
 def handle_disconnect():
     """Manejar desconexión de WebSocket"""
-    # Log reducido - solo en modo debug si es necesario
-    # logger.info(f"Cliente desconectado: {request.sid}")
+    logger.info(f"Cliente desconectado: {request.sid}")
 
 @app.errorhandler(404)
 def not_found(error):
