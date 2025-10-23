@@ -254,13 +254,18 @@ function clearChat() {
 
 async function checkSystemStatus() {
     try {
-        // Actualizar overlay con progreso
-        updateInitOverlay('Verificando estado del sistema...', 10);
-
         const response = await axios.get('/api/status', { timeout: 10000 });
         const data = response.data;
 
         console.log('Estado del sistema:', data);
+
+        // Usar progreso real del backend
+        const progress = data.initialization_progress || {};
+        const progressPercent = progress.progress_percent || 10;
+        const progressMessage = progress.message || 'Verificando estado...';
+
+        // Actualizar overlay con progreso real
+        updateInitOverlay(progressMessage, progressPercent);
 
         if (data.initialized) {
             // Sistema listo
@@ -273,21 +278,14 @@ async function checkSystemStatus() {
                 onSystemInitialized(data);
             }, 500);
         } else {
-            console.log('Sistema no inicializado, intentando inicializar...');
-            updateInitOverlay('Inicializando sistema...', 30);
-            updateStatus('Conectando...', 'warning');
+            // Sistema no inicializado, continuar polling
+            console.log(`Sistema no inicializado (${progressPercent}%): ${progressMessage}`);
+            updateStatus('Inicializando...', 'warning');
 
-            const initBtn = document.getElementById('initButton');
-            if (initBtn) initBtn.style.display = 'inline-block';
-
-            if (!initTriggered) {
-                initTriggered = true;
-                initializeSystem();
-            } else {
-                setTimeout(() => {
-                    checkSystemStatus();
-                }, 2000);
-            }
+            // Reintentar cada 2 segundos
+            setTimeout(() => {
+                checkSystemStatus();
+            }, 2000);
         }
     } catch (error) {
         console.error('Error verificando estado del sistema:', error);
@@ -302,14 +300,7 @@ async function checkSystemStatus() {
 
         updateStatus('Error de conexión', 'danger');
 
-        // Mostrar botón de inicialización en caso de error
-        const initBtn = document.getElementById('initButton');
-        if (initBtn) {
-            initBtn.style.display = 'inline-block';
-            initBtn.classList.remove('hidden');
-        }
-
-        // Reintentar
+        // Reintentar cada 3 segundos en caso de error
         setTimeout(checkSystemStatus, 3000);
     }
 }
@@ -884,8 +875,27 @@ async function sendMessage() {
         if (error.response) {
             // Error del servidor
             if (error.response.status === 503) {
-                errorMessage = '🔧 El sistema no está completamente inicializado. Espera un momento o recarga la página.';
-                canRetry = false;
+                // Sistema no inicializado - Reintentar automáticamente
+                const retryAfter = error.response.data?.retry_after || 10;
+                const progressMsg = error.response.data?.message || 'El sistema se está inicializando...';
+
+                console.log(`⏳ [sendMessage] 503 recibido: ${progressMsg} - Reintentando en ${retryAfter}s`);
+
+                errorMessage = `⏳ ${progressMsg}\n\n🔄 Reintentando automáticamente en ${retryAfter} segundos...`;
+
+                // Mostrar mensaje temporal
+                addMessage('assistant', errorMessage);
+
+                // Reintentar automáticamente después del tiempo sugerido
+                setTimeout(() => {
+                    console.log('🔄 [sendMessage] Reintentando mensaje automáticamente...');
+                    // Restaurar el mensaje en el input y enviar
+                    input.value = lastMessage;
+                    sendMessage();
+                }, retryAfter * 1000);
+
+                // Salir temprano para evitar el finally que habilita los controles
+                return;
             } else if (error.response.status === 500) {
                 errorMessage = '💥 Error interno del servidor. Esto puede deberse a una consulta muy compleja.';
             } else if (error.response.data && error.response.data.error) {
@@ -1844,10 +1854,19 @@ function updateInitOverlay(message, progress) {
     const overlay = document.getElementById('initOverlay');
     const messageEl = document.getElementById('initMessage');
     const progressEl = document.getElementById('initProgress');
+    const detailsEl = document.getElementById('initDetails');
 
     if (overlay && !overlay.classList.contains('hidden')) {
         if (messageEl) messageEl.textContent = message;
-        if (progressEl) progressEl.style.width = `${progress}%`;
+        if (progressEl) {
+            progressEl.style.width = `${progress}%`;
+            // Agregar transición suave
+            progressEl.style.transition = 'width 0.5s ease-in-out';
+        }
+        // Actualizar el texto de detalles con el porcentaje
+        if (detailsEl) {
+            detailsEl.textContent = `Progreso: ${progress}% - ${message}`;
+        }
     }
 }
 

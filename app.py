@@ -155,7 +155,29 @@ def get_status():
             app_state['db_connected'] = True
         if schema_loaded and not app_state['schema_loaded']:
             app_state['schema_loaded'] = True
-        
+
+        # Calcular progreso de inicialización
+        initialization_progress = {
+            'db_connected': app_state['db_connected'],
+            'schema_loaded': app_state['schema_loaded'],
+            'initialized': initialized,
+            'progress_percent': 0,
+            'message': 'Inicializando...'
+        }
+
+        if not app_state['db_connected']:
+            initialization_progress['progress_percent'] = 10
+            initialization_progress['message'] = 'Conectando a base de datos...'
+        elif app_state['db_connected'] and not app_state['schema_loaded']:
+            initialization_progress['progress_percent'] = 40
+            initialization_progress['message'] = 'Cargando esquema de base de datos (puede tardar 3-5 minutos)...'
+        elif app_state['schema_loaded'] and not initialized:
+            initialization_progress['progress_percent'] = 90
+            initialization_progress['message'] = 'Finalizando inicialización...'
+        elif initialized:
+            initialization_progress['progress_percent'] = 100
+            initialization_progress['message'] = 'Sistema listo'
+
         return jsonify({
             'status': 'ok',
             'initialized': initialized,
@@ -171,7 +193,8 @@ def get_status():
             'ai': {
                 'model': config.ai.model,
                 'provider': 'OpenAI'
-            }
+            },
+            'initialization_progress': initialization_progress
         })
     except Exception as e:
         logger.error("Error obteniendo estado", e)
@@ -283,7 +306,25 @@ def chat():
 
         if not app_state['initialized']:
             logger.warning("⚠️ [/api/chat] Sistema no inicializado")
-            return jsonify({'error': 'Sistema no inicializado'}), 503
+
+            # Calcular progreso y mensaje descriptivo
+            progress_msg = "Conectando a base de datos..."
+            retry_after = 5  # Segundos
+
+            if app_state['db_connected'] and not app_state['schema_loaded']:
+                progress_msg = "Cargando esquema de base de datos (puede tardar 3-5 minutos). Por favor espera..."
+                retry_after = 10
+            elif app_state['schema_loaded']:
+                progress_msg = "Finalizando inicialización del sistema..."
+                retry_after = 3
+
+            return jsonify({
+                'error': 'Sistema no inicializado',
+                'message': progress_msg,
+                'retry_after': retry_after,
+                'db_connected': app_state['db_connected'],
+                'schema_loaded': app_state['schema_loaded']
+            }), 503
 
         # Guardar mensaje del usuario en historial
         chat_history.add_message(
