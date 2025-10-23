@@ -64,7 +64,14 @@ function generateUUID() {
 
 function connectWebSocket() {
     try {
-    socket = io();
+    // Configurar SocketIO para mantener conexión WebSocket persistente
+    socket = io({
+        transports: ['websocket'],     // SOLO WebSocket (no long-polling)
+        reconnection: true,             // Auto-reconectar si se pierde conexión
+        reconnectionAttempts: 10,       // Intentar reconectar hasta 10 veces
+        reconnectionDelay: 1000,        // Esperar 1 segundo entre intentos
+        timeout: 20000                  // Timeout de 20 segundos para conexión inicial
+    });
 
     socket.on('connect', function() {
         console.log('WebSocket conectado');
